@@ -58,10 +58,10 @@ Run `zem doctor` to see what is missing.
 ## Installation
 
 Prebuilt binaries for macOS (Apple Silicon / Intel) and Linux (x86_64 / aarch64, statically linked) are attached to
-each [release](https://github.com/kei-abe/zem/releases). For example, on Apple Silicon:
+each [release](https://github.com/k-sukke/zem/releases). For example, on Apple Silicon:
 
 ```sh
-curl -fsSL https://github.com/kei-abe/zem/releases/latest/download/zem-aarch64-apple-darwin.tar.gz | tar xz
+curl -fsSL https://github.com/k-sukke/zem/releases/latest/download/zem-aarch64-apple-darwin.tar.gz | tar xz
 install -m 755 zem-aarch64-apple-darwin/zem ~/.local/bin/zem   # or any directory on your PATH
 ```
 
@@ -72,7 +72,7 @@ Each archive has a `.sha256` file next to it. If you download through a browser 
 Or build from source:
 
 ```sh
-cargo install --git https://github.com/kei-abe/zem
+cargo install --git https://github.com/k-sukke/zem
 ```
 
 ## Usage
