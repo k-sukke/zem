@@ -57,11 +57,25 @@ Run `zem doctor` to see what is missing.
 
 ## Installation
 
+### Homebrew
+
+```sh
+brew install k-sukke/tap/zem
+```
+
+### Prebuilt binary
+
 Prebuilt binaries for macOS (Apple Silicon / Intel) and Linux (x86_64 / aarch64, statically linked) are attached to
 each [release](https://github.com/k-sukke/zem/releases). For example, on Apple Silicon:
 
 ```sh
-curl -fsSL https://github.com/k-sukke/zem/releases/latest/download/zem-aarch64-apple-darwin.tar.gz | tar xz
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/k-sukke/zem/releases/latest/download/zem-installer.sh | sh
+```
+
+Or download an archive manually (cargo-dist publishes `.tar.xz`):
+
+```sh
+curl -fsSL https://github.com/k-sukke/zem/releases/latest/download/zem-aarch64-apple-darwin.tar.xz | tar xJ
 install -m 755 zem-aarch64-apple-darwin/zem ~/.local/bin/zem   # or any directory on your PATH
 ```
 
@@ -69,7 +83,7 @@ Replace the target with `x86_64-apple-darwin`, `x86_64-unknown-linux-musl` or `a
 Each archive has a `.sha256` file next to it. If you download through a browser on macOS, clear the quarantine flag with
 `xattr -d com.apple.quarantine zem` (the binaries are not notarized).
 
-Or build from source:
+### From source
 
 ```sh
 cargo install --git https://github.com/k-sukke/zem
@@ -262,7 +276,8 @@ cargo test --test e2e -- --ignored  # E2E that actually fetches and builds Zephy
 ```
 
 To release, bump `version` in `Cargo.toml`, commit, then push a matching tag (`git tag v0.1.0 && git push origin v0.1.0`).
-The Release workflow builds the binaries and publishes a GitHub release; it fails if the tag and `Cargo.toml` disagree.
+[cargo-dist](https://axodotdev.github.io/cargo-dist/) builds the binaries, creates the GitHub Release, and publishes the
+Homebrew formula to [`k-sukke/homebrew-tap`](https://github.com/k-sukke/homebrew-tap).
 
 The design and per-phase notes are in [PLAN.md](PLAN.md) (Japanese).
 

@@ -1,0 +1,26 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.34.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "homebrew"]
+# A GitHub repo to push Homebrew formulas to
+tap = "k-sukke/homebrew-tap"
+# Publish jobs to run in CI
+publish-jobs = ["homebrew"]
+# Target platforms to build apps for (Rust target-triple syntax)
+# Windows omitted: zem does not support it yet. Linux stays musl (static).
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+]
+
+[dist.github-custom-runners]
+aarch64-unknown-linux-musl = "ubuntu-24.04-arm"
