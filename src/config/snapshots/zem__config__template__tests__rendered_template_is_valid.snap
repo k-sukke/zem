@@ -1,0 +1,33 @@
+---
+source: src/config/template.rs
+expression: text
+---
+# zem project manifest. Run `zem sync` after editing this file.
+schema = 1
+
+[project]
+name = "blinky"
+
+[zephyr]
+# Zephyr release tag (v4.0 or later) or a full commit SHA.
+version = "v4.2.0"
+
+[target]
+board = "esp32s3_devkitc/esp32s3/procpu"
+
+[modules]
+# Optional features: mbedtls, lvgl, littlefs, mcuboot, segger.
+# hal_espressif is added automatically for ESP32 targets.
+features = ["mbedtls"]
+# Additional west project names from Zephyr's west.yml.
+extra = []
+
+[blobs]
+# Set to true to accept the Espressif binary blob licenses non-interactively.
+accept_licenses = false
+
+[python]
+version = "3.12"
+
+[build]
+dir = "build"
