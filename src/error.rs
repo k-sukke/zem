@@ -102,6 +102,14 @@ pub enum ZemError {
         advice: Option<String>,
     },
 
+    #[error("{tool} was not found")]
+    #[diagnostic(code(zem::tool::missing))]
+    ToolNotFound {
+        tool: &'static str,
+        #[help]
+        advice: Option<String>,
+    },
+
     #[error("no uv build is available for {os} ({arch})")]
     #[diagnostic(
         code(zem::uv::unsupported),

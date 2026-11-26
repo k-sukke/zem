@@ -2,6 +2,10 @@ use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::env::EnvBuilder;
+use crate::error::{Result, ZemError};
+use crate::platform;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
     pub major: u32,
@@ -82,6 +86,22 @@ pub const MIN_CMAKE: Version = Version::new(3, 20, 5);
 pub struct Probe {
     pub path: PathBuf,
     pub version: Option<Version>,
+}
+
+/// Find the first candidate of `spec` on the `PATH` of `env`, the environment zem runs its
+/// child processes with. Fails with an install hint when none is found.
+pub fn require_in_env(env: &EnvBuilder, spec: &ToolSpec) -> Result<PathBuf> {
+    spec.candidates
+        .iter()
+        .find_map(|name| {
+            let path = env.get("PATH")?;
+            let cwd = std::env::current_dir().ok()?;
+            which::which_in(name, Some(path), cwd).ok()
+        })
+        .ok_or_else(|| ZemError::ToolNotFound {
+            tool: spec.name,
+            advice: platform::install_hint(spec.name).map(|h| h.to_string()),
+        })
 }
 
 /// Locate a tool on PATH (honouring PATHEXT on Windows) and read its version.

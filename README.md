@@ -48,7 +48,8 @@ zem tries to solve these with the following principles:
 ## Requirements
 
 - macOS or Linux
-- git
+- git (required; `zem sync` stops with an install hint if it is missing)
+- network access for the first `zem sync` (Zephyr, the SDK, uv and Python are downloaded)
 - Rust 1.89+ (only to build zem from source)
 
 You do not need to install uv or Python. On the first `zem sync`, zem downloads its own pinned

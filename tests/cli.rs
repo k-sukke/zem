@@ -228,8 +228,11 @@ fn sync_ignores_host_uv_and_fails_cleanly_when_it_cannot_download() {
     let sb = Sandbox::new();
     sb.init("esp32c3_devkitm");
 
-    // A uv on PATH must never be used: zem manages its own pinned copy.
+    // A uv on PATH must never be used: zem manages its own pinned copy. git is required, so
+    // the PATH keeps the real one.
     let bin = tempfile::tempdir().unwrap();
+    let git = which::which("git").expect("git is required to run the tests");
+    std::os::unix::fs::symlink(git, bin.path().join("git")).unwrap();
     let ran = bin.path().join("host-uv-ran");
     let fake_uv = bin.path().join("uv");
     fs::write(
@@ -269,6 +272,26 @@ fn sync_ignores_host_uv_and_fails_cleanly_when_it_cannot_download() {
             .read_dir()
             .is_ok_and(|mut d| d.any(|e| e.is_ok_and(|e| e.file_name() == "uv-0.13.10"))),
         "a failed download must not leave an installed uv"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_without_git_fails_before_downloading() {
+    let sb = Sandbox::new();
+    sb.init("esp32c3_devkitm");
+    let empty_path = tempfile::tempdir().unwrap();
+    sb.zem()
+        .env("PATH", empty_path.path())
+        .arg("sync")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("git was not found"));
+    assert!(
+        fs::read_dir(sb.zem_home.path().join("tools"))
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "nothing may be downloaded before git is found"
     );
 }
 

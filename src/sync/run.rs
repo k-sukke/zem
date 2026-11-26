@@ -21,6 +21,7 @@ use crate::store::uv::{UvRelease, UvStore};
 use crate::store::venv::{Outcome, VenvStore};
 use crate::store::workspace::{WorkspaceStore, resolve_branch};
 use crate::store::{self as stores};
+use crate::tools;
 
 #[derive(Debug, Clone, Default)]
 pub struct SyncOptions {
@@ -163,6 +164,10 @@ fn run_steps(
         fsutil::create_dir_all(&dir)?;
     }
     fsutil::touch(&home.westconfig_path())?;
+
+    // west runs git for every workspace update, and branch revisions need `git ls-remote`:
+    // fail with an install hint before anything is downloaded.
+    tools::require_in_env(&sync_env(home, &plan, cfg), &tools::GIT)?;
 
     if plan.unresolved_branch
         || (opts.update && !classify_revision(&cfg.zephyr.version).is_immutable())
