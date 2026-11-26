@@ -9,9 +9,9 @@ use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use espressif::{KNOWN_BOARDS, KnownBoard, Soc, known_board};
+pub use espressif::{KNOWN_BOARDS, Soc, known_board};
 pub use qualifier::BoardId;
-pub use resolve::{ResolutionSource, ResolvedTarget, resolve_static};
+pub use resolve::{ResolvedTarget, resolve_static};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

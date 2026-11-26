@@ -76,9 +76,9 @@
 
 ## Phase 5: 仕上げ（可視性・ドキュメント・最終検証）
 
-- [ ] `src/lib.rs` 及び各モジュールの可視性 (`pub` vs `pub(crate)`) を見直し、今後のデッドコードをコンパイラが検出できるようにする
-- [ ] `README.md` 等のドキュメントから廃止した設定（`host_tools_via_pip`, `[target].arch` 等）の記述を更新
-- [ ] 最終検証
+- [x] `src/lib.rs` 及び各モジュールの可視性 (`pub` vs `pub(crate)`) を見直し、今後のデッドコードをコンパイラが検出できるようにする
+- [x] `README.md` 等のドキュメントから廃止した設定（`host_tools_via_pip`, `[target].arch` 等）の記述を更新
+- [x] 最終検証
   - `cargo test`
   - `cargo clippy --all-targets -- -D warnings`
   - `./scripts/check-platform-boundary.sh`

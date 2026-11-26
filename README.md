@@ -56,7 +56,7 @@ You do not need to install uv or Python. On the first `zem sync`, zem downloads 
 [uv](https://docs.astral.sh/uv/) into `~/.zem/tools` (checksum-verified; a uv on your `PATH` is ignored),
 and uv provisions Python. To fetch uv from a mirror, set `ZEM_UV_BASE_URL` (same layout as GitHub releases).
 
-cmake and ninja are installed into the venv via pip by default, so they are not required on the host. `dtc` is recommended.
+cmake and ninja are installed into the venv by uv, so they are not required on the host. `dtc` is recommended.
 Run `zem doctor` to see what is missing.
 
 ## Installation
@@ -251,7 +251,7 @@ Deleting `~/.zem` removes everything zem has created.
 By default, commands launched by zem do not receive:
 
 - ESP-IDF variables (`IDF_PATH`, ...), other Zephyr variables (`ZEPHYR_*`), Python environment variables
-  (`VIRTUAL_ENV`, `CONDA_*`, `PYTHONPATH`, `PIP_*`, ...)
+  (`VIRTUAL_ENV`, `CONDA_*`, `PYTHONPATH`, `PIP_*`, `UV_*`, ...)
 - `PATH` entries for `.espressif`, `esp-idf`, `zephyr-sdk-*`, and other venv / conda `bin` directories
 
 For stricter isolation, there is a mode that passes only allowlisted variables:

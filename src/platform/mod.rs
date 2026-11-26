@@ -22,7 +22,7 @@ use windows as imp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
-    MacOs,
+    Mac,
     Linux,
     Windows,
     Other,
@@ -31,7 +31,7 @@ pub enum Os {
 impl Os {
     pub fn current() -> Self {
         if cfg!(target_os = "macos") {
-            Os::MacOs
+            Os::Mac
         } else if cfg!(target_os = "linux") {
             Os::Linux
         } else if cfg!(windows) {
@@ -43,7 +43,7 @@ impl Os {
 
     pub fn name(self) -> &'static str {
         match self {
-            Os::MacOs => "macOS",
+            Os::Mac => "macOS",
             Os::Linux => "Linux",
             Os::Windows => "Windows",
             Os::Other => "this OS",
@@ -52,7 +52,7 @@ impl Os {
 
     /// Whether zem can create and run environments (not just parse config) on this OS.
     pub fn runs_environments(self) -> bool {
-        matches!(self, Os::MacOs | Os::Linux)
+        matches!(self, Os::Mac | Os::Linux)
     }
 }
 
@@ -143,8 +143,8 @@ pub fn canonicalize_lenient(p: &Path) -> PathBuf {
 /// Host name used in Zephyr SDK release asset names, e.g. `macos-aarch64`.
 pub fn sdk_host() -> Option<&'static str> {
     match (Os::current(), arch_name()) {
-        (Os::MacOs, "aarch64") => Some("macos-aarch64"),
-        (Os::MacOs, "x86_64") => Some("macos-x86_64"),
+        (Os::Mac, "aarch64") => Some("macos-aarch64"),
+        (Os::Mac, "x86_64") => Some("macos-x86_64"),
         (Os::Linux, "x86_64") => Some("linux-x86_64"),
         (Os::Linux, "aarch64") => Some("linux-aarch64"),
         (Os::Windows, "x86_64") => Some("windows-x86_64"),
@@ -160,8 +160,8 @@ pub fn sdk_archive_ext() -> &'static str {
 /// statically linked musl builds, which run on any distribution.
 pub fn uv_target() -> Option<&'static str> {
     match (Os::current(), arch_name()) {
-        (Os::MacOs, "aarch64") => Some("aarch64-apple-darwin"),
-        (Os::MacOs, "x86_64") => Some("x86_64-apple-darwin"),
+        (Os::Mac, "aarch64") => Some("aarch64-apple-darwin"),
+        (Os::Mac, "x86_64") => Some("x86_64-apple-darwin"),
         (Os::Linux, "x86_64") => Some("x86_64-unknown-linux-musl"),
         (Os::Linux, "aarch64") => Some("aarch64-unknown-linux-musl"),
         _ => None,
