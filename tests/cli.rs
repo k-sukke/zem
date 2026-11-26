@@ -384,7 +384,6 @@ commit = "{commit}"
 version = "0.17.2"
 [python]
 version = "3.12"
-host-tools-via-pip = true
 packages = []
 "#
         ),

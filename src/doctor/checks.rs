@@ -6,23 +6,19 @@ use crate::env::{self, shell::posix_quote_if_needed};
 use crate::home::ZemHome;
 use crate::platform::{self, Os, SerialAccess};
 use crate::store::uv::{UvRelease, UvStore};
-use crate::tools::{self, MIN_CMAKE, Probe, ToolSpec};
+use crate::tools::{self, Probe};
 use crate::{serial, session, sync};
 
 const SYNCED_FOLDER_MARKERS: &[&str] = &["mobile documents", "onedrive", "dropbox", "google drive"];
 
 pub fn collect(cwd: &Path) -> Report {
     let project = config::load(cwd);
-    let host_tools_via_pip = project
-        .as_ref()
-        .map(|p| p.config.python.host_tools_via_pip)
-        .unwrap_or(true);
 
     Report {
         sections: vec![
             ("Host", host_checks()),
             ("Required tools", required_tool_checks()),
-            ("Build tools", build_tool_checks(host_tools_via_pip)),
+            ("Build tools", build_tool_checks()),
             ("Environment", environment_checks()),
             ("Project", project_checks(project)),
         ],
@@ -78,15 +74,15 @@ fn describe(probe: &Probe) -> String {
     }
 }
 
-fn missing(status: Status, spec: &ToolSpec, detail: &str) -> Check {
-    Check::new(status, spec.name, detail).install(platform::install_hint(spec.name))
+fn missing(status: Status, tool: &str, detail: &str) -> Check {
+    Check::new(status, tool, detail).install(platform::install_hint(tool))
 }
 
 fn required_tool_checks() -> Vec<Check> {
     vec![
-        match tools::probe(&tools::GIT) {
+        match tools::probe("git") {
             Some(p) => Check::new(Status::Ok, "git", describe(&p)),
-            None => missing(Status::Fail, &tools::GIT, "not found (required by west)"),
+            None => missing(Status::Fail, "git", "not found (required by west)"),
         },
         uv_check(),
     ]
@@ -98,7 +94,7 @@ fn uv_check() -> Check {
         Err(err) => return Check::new(Status::Fail, "uv", err.to_string()),
     };
     let version = release.version.clone();
-    let host_uv = tools::probe(&tools::UV);
+    let host_uv = tools::probe("uv");
     let check = match ZemHome::resolve() {
         Ok(home) => {
             let store = UvStore {
@@ -134,52 +130,37 @@ fn uv_check() -> Check {
     }
 }
 
-fn build_tool_checks(host_tools_via_pip: bool) -> Vec<Check> {
+fn build_tool_checks() -> Vec<Check> {
     let mut checks = Vec::new();
-    for (spec, min) in [(tools::CMAKE, Some(MIN_CMAKE)), (tools::NINJA, None)] {
-        let check = match (tools::probe(&spec), host_tools_via_pip) {
-            (Some(p), true) => Check::new(
+    for tool in ["cmake", "ninja"] {
+        let check = match tools::probe(tool) {
+            Some(p) => Check::new(
                 Status::Info,
-                spec.name,
+                tool,
                 format!(
                     "host {} found; zem uses its own copy in the venv",
                     describe(&p)
                 ),
             ),
-            (None, true) => Check::new(
+            None => Check::new(
                 Status::Info,
-                spec.name,
+                tool,
                 "will be installed into the venv by `zem sync`",
-            ),
-            (Some(p), false) if min.is_some_and(|m| p.version.is_some_and(|v| v < m)) => missing(
-                Status::Fail,
-                &spec,
-                &format!(
-                    "{} is older than {}",
-                    describe(&p),
-                    min.unwrap_or(MIN_CMAKE)
-                ),
-            ),
-            (Some(p), false) => Check::new(Status::Ok, spec.name, describe(&p)),
-            (None, false) => missing(
-                Status::Fail,
-                &spec,
-                "not found (required because [python].host_tools_via_pip = false)",
             ),
         };
         checks.push(check);
     }
 
-    checks.push(match tools::probe(&tools::DTC) {
+    checks.push(match tools::probe("dtc") {
         Some(p) => Check::new(Status::Ok, "dtc", describe(&p)),
         None => missing(
             Status::Warn,
-            &tools::DTC,
+            "dtc",
             "not found (recommended for devicetree checks)",
         ),
     });
 
-    checks.push(match tools::probe(&tools::WEST) {
+    checks.push(match tools::probe("west") {
         Some(p) => Check::new(
             Status::Info,
             "west",

@@ -42,79 +42,35 @@ impl fmt::Display for Version {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ToolSpec {
-    pub name: &'static str,
-    pub candidates: &'static [&'static str],
-    pub version_args: &'static [&'static str],
-}
-
-pub const GIT: ToolSpec = ToolSpec {
-    name: "git",
-    candidates: &["git"],
-    version_args: &["--version"],
-};
-pub const UV: ToolSpec = ToolSpec {
-    name: "uv",
-    candidates: &["uv"],
-    version_args: &["--version"],
-};
-pub const CMAKE: ToolSpec = ToolSpec {
-    name: "cmake",
-    candidates: &["cmake"],
-    version_args: &["--version"],
-};
-pub const NINJA: ToolSpec = ToolSpec {
-    name: "ninja",
-    candidates: &["ninja"],
-    version_args: &["--version"],
-};
-pub const DTC: ToolSpec = ToolSpec {
-    name: "dtc",
-    candidates: &["dtc"],
-    version_args: &["--version"],
-};
-pub const WEST: ToolSpec = ToolSpec {
-    name: "west",
-    candidates: &["west"],
-    version_args: &["--version"],
-};
-
-pub const MIN_CMAKE: Version = Version::new(3, 20, 5);
-
 #[derive(Debug, Clone)]
 pub struct Probe {
     pub path: PathBuf,
     pub version: Option<Version>,
 }
 
-/// Find the first candidate of `spec` on the `PATH` of `env`, the environment zem runs its
-/// child processes with. Fails with an install hint when none is found.
-pub fn require_in_env(env: &EnvBuilder, spec: &ToolSpec) -> Result<PathBuf> {
-    spec.candidates
-        .iter()
-        .find_map(|name| {
-            let path = env.get("PATH")?;
+/// Find `tool` on the `PATH` of `env`, the environment zem runs its child processes with.
+/// Fails with an install hint when it is not found.
+pub fn require_in_env(env: &EnvBuilder, tool: &'static str) -> Result<PathBuf> {
+    env.get("PATH")
+        .and_then(|path| {
             let cwd = std::env::current_dir().ok()?;
-            which::which_in(name, Some(path), cwd).ok()
+            which::which_in(tool, Some(path), cwd).ok()
         })
         .ok_or_else(|| ZemError::ToolNotFound {
-            tool: spec.name,
-            advice: platform::install_hint(spec.name).map(|h| h.to_string()),
+            tool,
+            advice: platform::install_hint(tool).map(|h| h.to_string()),
         })
 }
 
-/// Locate a tool on PATH (honouring PATHEXT on Windows) and read its version.
-pub fn probe(spec: &ToolSpec) -> Option<Probe> {
-    spec.candidates.iter().find_map(|candidate| {
-        let path = which::which(candidate).ok()?;
-        let output = Command::new(&path).args(spec.version_args).output().ok()?;
-        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-        text.push_str(&String::from_utf8_lossy(&output.stderr));
-        Some(Probe {
-            version: Version::parse_first(&text),
-            path,
-        })
+/// Locate a tool on PATH (honouring PATHEXT on Windows) and read its `--version`.
+pub fn probe(tool: &str) -> Option<Probe> {
+    let path = which::which(tool).ok()?;
+    let output = Command::new(&path).arg("--version").output().ok()?;
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    Some(Probe {
+        version: Version::parse_first(&text),
+        path,
     })
 }
 
@@ -150,6 +106,6 @@ mod tests {
     #[test]
     fn version_ordering() {
         assert!(Version::new(3, 20, 5) > Version::new(3, 20, 0));
-        assert!(Version::new(3, 19, 9) < MIN_CMAKE);
+        assert!(Version::new(3, 19, 9) < Version::new(3, 20, 5));
     }
 }

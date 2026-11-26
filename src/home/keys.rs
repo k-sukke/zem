@@ -88,16 +88,10 @@ pub struct VenvKey {
     workspace: WorkspaceKey,
     python: String,
     extra_requirements: Vec<String>,
-    host_tools_via_pip: bool,
 }
 
 impl VenvKey {
-    pub fn new(
-        workspace: WorkspaceKey,
-        python: &str,
-        extra_requirements: &[String],
-        host_tools_via_pip: bool,
-    ) -> Self {
+    pub fn new(workspace: WorkspaceKey, python: &str, extra_requirements: &[String]) -> Self {
         let mut extra: Vec<String> = extra_requirements
             .iter()
             .map(|r| r.trim().to_string())
@@ -108,24 +102,21 @@ impl VenvKey {
             workspace,
             python: python.trim().to_string(),
             extra_requirements: extra,
-            host_tools_via_pip,
         }
     }
 
     pub fn dir_name(&self) -> String {
         let extra = self.extra_requirements.join("\n");
-        let host_tools = if self.host_tools_via_pip { "1" } else { "0" };
         format!(
             "py{}-{}",
             slug(&self.python, 8),
             short_hash(
-                "zem-venv-v1",
+                "zem-venv-v2",
                 &[
                     &self.workspace.url,
                     &self.workspace.revision,
                     &self.python,
                     &extra,
-                    host_tools
                 ],
             )
         )
@@ -171,17 +162,12 @@ mod tests {
     #[test]
     fn venv_key_is_order_insensitive() {
         let ws = WorkspaceKey::new(URL, "v4.2.0");
-        let a = VenvKey::new(ws.clone(), "3.12", &["b".into(), "a".into()], true);
-        let b = VenvKey::new(
-            ws.clone(),
-            "3.12",
-            &["a".into(), "b".into(), "a".into()],
-            true,
-        );
+        let a = VenvKey::new(ws.clone(), "3.12", &["b".into(), "a".into()]);
+        let b = VenvKey::new(ws.clone(), "3.12", &["a".into(), "b".into(), "a".into()]);
         assert_eq!(a.dir_name(), b.dir_name());
         assert_ne!(
             a.dir_name(),
-            VenvKey::new(ws, "3.12", &["a".into(), "b".into()], false).dir_name()
+            VenvKey::new(ws, "3.13", &["a".into(), "b".into()]).dir_name()
         );
         assert!(a.dir_name().starts_with("py3.12-"));
     }

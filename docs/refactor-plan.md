@@ -42,7 +42,7 @@
 
 ## Phase 3: `uv` 専用化に伴う簡略化
 
-- [ ] `[python].host_tools_via_pip` の廃止（常に `uv` 経由で `west` / `cmake` / `ninja` を venv に入れる前提にする）
+- [x] `[python].host_tools_via_pip` の廃止（常に `uv` 経由で `west` / `cmake` / `ninja` を venv に入れる前提にする）
   - `src/config/schema.rs` (`Python`)
   - `src/lockfile.rs` (`PythonLock`)
   - `src/home/keys.rs` (`VenvKey`)
@@ -51,11 +51,11 @@
   - `src/tools/mod.rs` (`MIN_CMAKE` 等、不要になった定義の整理)
   - `src/platform/{unix,windows}.rs` (`cmake` / `ninja` のインストールヒント整理)
   - 関連テスト・スナップショットの更新
-- [ ] `src/tools/mod.rs` の `ToolSpec` 簡略化
+- [x] `src/tools/mod.rs` の `ToolSpec` 簡略化
   - 複数候補探索 (`candidates`) と `version_args` を廃止し、`probe(name: &str)` / `require_in_env(env, name)` に単純化
-- [ ] `src/env/sanitize.rs` に `"UV_"` を `DENY_PREFIXES` として追加
+- [x] `src/env/sanitize.rs` に `"UV_"` を `DENY_PREFIXES` として追加
   - ホストの `UV_INDEX_URL` / `UV_OFFLINE` / `UV_SYSTEM_PYTHON` 等が `zem` 管理の `uv` に影響しないようにする（`zem_env_from` で `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` を明示設定する）
-- [ ] コメント・メッセージ内の旧 `pip` 表記を整理（`src/lockfile.rs` 等）
+- [x] コメント・メッセージ内の旧 `pip` 表記を整理（`src/lockfile.rs` 等）
 
 ---
 

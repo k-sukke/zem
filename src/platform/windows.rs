@@ -84,8 +84,6 @@ pub fn install_hint(_os: Os, tool: &str) -> Option<InstallHint> {
     let hint = |command, alternative| Some(InstallHint::new(command, alternative));
     match tool {
         "git" => hint("winget install --id Git.Git", None),
-        "cmake" => hint("winget install --id Kitware.CMake", None),
-        "ninja" => hint("winget install --id Ninja-build.Ninja", None),
         "dtc" => hint("choco install dtc-msys2", None),
         _ => None,
     }

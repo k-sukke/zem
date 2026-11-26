@@ -188,7 +188,7 @@ fn run_steps(
     // west runs git for every workspace update, and branch revisions need `git ls-remote`:
     // fail with an install hint before anything is downloaded.
     let preflight_env = sync_env(home, &plan, cfg);
-    tools::require_in_env(&preflight_env, &tools::GIT)?;
+    tools::require_in_env(&preflight_env, "git")?;
 
     if plan.unresolved_branch
         || (opts.update && !classify_revision(&cfg.zephyr.version).is_immutable())

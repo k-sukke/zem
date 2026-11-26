@@ -84,7 +84,6 @@ fn keys(loaded: &LoadedConfig, revision: &str) -> (WorkspaceKey, VenvKey) {
         workspace.clone(),
         &cfg.python.version,
         &cfg.python.extra_requirements,
-        cfg.python.host_tools_via_pip,
     );
     (workspace, venv)
 }

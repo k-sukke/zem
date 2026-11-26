@@ -38,13 +38,8 @@ pub fn installed_packages(dir: &Path) -> Option<Vec<String>> {
     read_venv_marker(dir).map(|m| m.packages)
 }
 
-pub fn bootstrap_packages(cfg: &Python) -> Vec<String> {
-    let mut pkgs = vec!["west".to_string()];
-    if cfg.host_tools_via_pip {
-        pkgs.extend(["cmake".to_string(), "ninja".to_string()]);
-    }
-    pkgs
-}
+/// Tools installed into every venv before a Zephyr workspace exists.
+const BOOTSTRAP_PACKAGES: &[&str] = &["west", "cmake", "ninja"];
 
 pub struct VenvStore<'a> {
     pub dir: &'a Path,
@@ -104,7 +99,7 @@ impl VenvStore<'_> {
         self.pip_install_at(
             &staged_venv,
             uv,
-            &bootstrap_packages(self.cfg),
+            BOOTSTRAP_PACKAGES,
             None,
             pins.map(|(_, constraints)| constraints),
         )?;
@@ -186,11 +181,11 @@ impl VenvStore<'_> {
         Ok(lockfile::parse_freeze(&self.runner.output(&mut cmd)?))
     }
 
-    fn pip_install_at(
+    fn pip_install_at<S: AsRef<str>>(
         &self,
         venv_dir: &Path,
         uv: &Path,
-        packages: &[String],
+        packages: &[S],
         requirements: Option<&Path>,
         constraints: Option<&Path>,
     ) -> Result<()> {
@@ -203,7 +198,7 @@ impl VenvStore<'_> {
         if let Some(constraints) = constraints {
             cmd.arg("-c").arg(constraints);
         }
-        cmd.args(packages);
+        cmd.args(packages.iter().map(AsRef::as_ref));
         self.runner.run(&mut cmd)
     }
 }
@@ -241,14 +236,6 @@ pub fn requirements_digest(requirements: &str, extras: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bootstrap_includes_host_tools_only_when_enabled() {
-        let mut cfg = Python::default();
-        assert_eq!(bootstrap_packages(&cfg), ["west", "cmake", "ninja"]);
-        cfg.host_tools_via_pip = false;
-        assert_eq!(bootstrap_packages(&cfg), ["west"]);
-    }
 
     #[test]
     fn requirements_digest_depends_on_extras() {

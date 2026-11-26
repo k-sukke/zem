@@ -162,7 +162,6 @@ impl From<SdkVersion> for String {
 #[serde(deny_unknown_fields, default)]
 pub struct Python {
     pub version: String,
-    pub host_tools_via_pip: bool,
     pub extra_requirements: Vec<String>,
 }
 
@@ -170,7 +169,6 @@ impl Default for Python {
     fn default() -> Self {
         Python {
             version: DEFAULT_PYTHON_VERSION.to_string(),
-            host_tools_via_pip: true,
             extra_requirements: Vec::new(),
         }
     }

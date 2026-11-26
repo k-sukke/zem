@@ -92,15 +92,11 @@ pub fn install_hint(os: Os, tool: &str) -> Option<InstallHint> {
     let hint = |command, alternative| Some(InstallHint::new(command, alternative));
     match (os, tool) {
         (Os::MacOs, "git") => hint("xcode-select --install", Some("brew install git")),
-        (Os::MacOs, "cmake") => hint("brew install cmake", None),
-        (Os::MacOs, "ninja") => hint("brew install ninja", None),
         (Os::MacOs, "dtc") => hint("brew install dtc", None),
         (Os::Linux, "git") => hint(
             "sudo apt install git",
             Some("your distribution's equivalent"),
         ),
-        (Os::Linux, "cmake") => hint("sudo apt install cmake", None),
-        (Os::Linux, "ninja") => hint("sudo apt install ninja-build", None),
         (Os::Linux, "dtc") => hint("sudo apt install device-tree-compiler", None),
         _ => None,
     }
