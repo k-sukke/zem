@@ -35,23 +35,6 @@ pub fn installed_packages(dir: &Path) -> Option<Vec<String>> {
         .and_then(|m| m.packages)
 }
 
-fn find_in(env: &EnvBuilder, name: &str) -> Option<PathBuf> {
-    let path = env.get("PATH")?;
-    let cwd = std::env::current_dir().ok()?;
-    which::which_in(name, Some(path), cwd).ok()
-}
-
-pub fn resolve_uv(env: &EnvBuilder) -> Result<PathBuf> {
-    find_in(env, "uv").ok_or_else(|| ZemError::ToolNotFound {
-        tool: "uv",
-        advice: Some(
-            platform::install_hint("uv")
-                .map(|h| h.to_string())
-                .unwrap_or_else(|| "install uv: https://docs.astral.sh/uv/".to_string()),
-        ),
-    })
-}
-
 pub fn bootstrap_packages(cfg: &Python) -> Vec<String> {
     let mut pkgs = vec!["west".to_string()];
     if cfg.host_tools_via_pip {
@@ -216,15 +199,6 @@ mod tests {
         assert_ne!(a, b);
         assert_ne!(a, c);
         assert_eq!(a, requirements_digest("PyYAML\n", &[]));
-    }
-
-    #[test]
-    fn missing_uv_is_reported() {
-        let env = EnvBuilder::from_vars([("PATH", "")]);
-        assert!(matches!(
-            resolve_uv(&env),
-            Err(ZemError::ToolNotFound { tool: "uv", .. })
-        ));
     }
 
     #[test]

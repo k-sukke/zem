@@ -7,6 +7,7 @@ use super::{InstallHint, Os, SerialAccess};
 
 pub const EXE_SUFFIX: &str = ".exe";
 pub const SDK_ARCHIVE_EXT: &str = ".7z";
+pub const UV_ARCHIVE_EXT: &str = ".zip";
 pub const VENV_BIN_DIR: &str = "Scripts";
 
 pub const STRICT_ENV_ALLOWLIST: &[&str] = &[
@@ -57,6 +58,13 @@ pub fn extract_sdk_archive(_archive: &Path, _dest: &Path) -> io::Result<()> {
     ))
 }
 
+pub fn extract_uv_archive(_archive: &Path, _dest: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "extracting .zip uv archives is not implemented yet",
+    ))
+}
+
 pub fn tls_config() -> ureq::tls::TlsConfig {
     ureq::tls::TlsConfig::builder()
         .provider(ureq::tls::TlsProvider::NativeTls)
@@ -80,7 +88,6 @@ pub fn install_hint(_os: Os, tool: &str) -> Option<InstallHint> {
     let hint = |command, alternative| Some(InstallHint::new(command, alternative));
     match tool {
         "git" => hint("winget install --id Git.Git", None),
-        "uv" => hint("winget install --id astral-sh.uv", None),
         "cmake" => hint("winget install --id Kitware.CMake", None),
         "ninja" => hint("winget install --id Ninja-build.Ninja", None),
         "dtc" => hint("choco install dtc-msys2", None),

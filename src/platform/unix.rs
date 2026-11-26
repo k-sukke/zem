@@ -8,6 +8,7 @@ use super::{InstallHint, Os, SerialAccess};
 
 pub const EXE_SUFFIX: &str = "";
 pub const SDK_ARCHIVE_EXT: &str = ".tar.xz";
+pub const UV_ARCHIVE_EXT: &str = ".tar.gz";
 pub const VENV_BIN_DIR: &str = "bin";
 
 pub const STRICT_ENV_ALLOWLIST: &[&str] = &[
@@ -47,6 +48,14 @@ pub fn extract_sdk_archive(archive: &Path, dest: &Path) -> io::Result<()> {
     let file = std::fs::File::open(archive)?;
     let xz = liblzma::read::XzDecoder::new_multi_decoder(io::BufReader::new(file));
     let mut tar = tar::Archive::new(xz);
+    tar.set_preserve_permissions(true);
+    tar.unpack(dest)
+}
+
+pub fn extract_uv_archive(archive: &Path, dest: &Path) -> io::Result<()> {
+    let file = std::fs::File::open(archive)?;
+    let gz = flate2::read::GzDecoder::new(io::BufReader::new(file));
+    let mut tar = tar::Archive::new(gz);
     tar.set_preserve_permissions(true);
     tar.unpack(dest)
 }
@@ -91,10 +100,6 @@ pub fn install_hint(os: Os, tool: &str) -> Option<InstallHint> {
     let hint = |command, alternative| Some(InstallHint::new(command, alternative));
     match (os, tool) {
         (Os::MacOs, "git") => hint("xcode-select --install", Some("brew install git")),
-        (Os::MacOs, "uv") => hint(
-            "brew install uv",
-            Some("curl -LsSf https://astral.sh/uv/install.sh | sh"),
-        ),
         (Os::MacOs, "cmake") => hint("brew install cmake", None),
         (Os::MacOs, "ninja") => hint("brew install ninja", None),
         (Os::MacOs, "dtc") => hint("brew install dtc", None),
@@ -102,7 +107,6 @@ pub fn install_hint(os: Os, tool: &str) -> Option<InstallHint> {
             "sudo apt install git",
             Some("your distribution's equivalent"),
         ),
-        (Os::Linux, "uv") => hint("curl -LsSf https://astral.sh/uv/install.sh | sh", None),
         (Os::Linux, "cmake") => hint("sudo apt install cmake", None),
         (Os::Linux, "ninja") => hint("sudo apt install ninja-build", None),
         (Os::Linux, "dtc") => hint("sudo apt install device-tree-compiler", None),
@@ -137,6 +141,36 @@ mod tests {
         assert_eq!(std::fs::read(&gcc).unwrap(), b"hello");
         assert_eq!(
             std::fs::metadata(&gcc).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+
+    #[test]
+    fn extracts_tar_gz_with_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("t.tar.gz");
+        let gz = flate2::write::GzEncoder::new(
+            std::fs::File::create(&archive).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut builder = tar::Builder::new(gz);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(5);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "uv-x/uv", &b"hello"[..])
+            .unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+
+        let dest = tmp.path().join("out");
+        extract_uv_archive(&archive, &dest).unwrap();
+        let uv = dest.join("uv-x/uv");
+        assert_eq!(std::fs::read(&uv).unwrap(), b"hello");
+        assert_eq!(
+            std::fs::metadata(&uv).unwrap().permissions().mode() & 0o777,
             0o755
         );
     }

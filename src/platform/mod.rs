@@ -151,6 +151,27 @@ pub fn sdk_archive_ext() -> &'static str {
     imp::SDK_ARCHIVE_EXT
 }
 
+/// Target triple in uv release asset names, e.g. `aarch64-apple-darwin`. Linux uses the
+/// statically linked musl builds, which run on any distribution.
+pub fn uv_target() -> Option<&'static str> {
+    match (Os::current(), arch_name()) {
+        (Os::MacOs, "aarch64") => Some("aarch64-apple-darwin"),
+        (Os::MacOs, "x86_64") => Some("x86_64-apple-darwin"),
+        (Os::Linux, "x86_64") => Some("x86_64-unknown-linux-musl"),
+        (Os::Linux, "aarch64") => Some("aarch64-unknown-linux-musl"),
+        _ => None,
+    }
+}
+
+pub fn uv_archive_ext() -> &'static str {
+    imp::UV_ARCHIVE_EXT
+}
+
+/// Unpack a uv release archive (`uv_archive_ext`) into `dest`.
+pub fn extract_uv_archive(archive: &Path, dest: &Path) -> io::Result<()> {
+    imp::extract_uv_archive(archive, dest)
+}
+
 /// Unpack an SDK release archive (`sdk_archive_ext`) into `dest`.
 pub fn extract_sdk_archive(archive: &Path, dest: &Path) -> io::Result<()> {
     imp::extract_sdk_archive(archive, dest)

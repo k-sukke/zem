@@ -3,13 +3,10 @@
 //! API and always runs `setup.sh`, which registers the SDK in `~/.cmake/packages`.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::{self, BufReader, IsTerminal, Read, Write};
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use indicatif::{ProgressBar, ProgressStyle};
-use sha2::{Digest, Sha256};
-
+use super::{EXTRACT_PREFIX, download};
 use crate::config::SdkVersion;
 use crate::error::{Result, ZemError};
 use crate::fsutil;
@@ -169,10 +166,10 @@ impl SdkStore<'_> {
         let path = self.downloads_dir().join("sha256.sum");
         if !path.is_file() {
             let url = self.url("sha256.sum");
-            let body = http_get(&url)?
+            let body = download::http_get(&url)?
                 .into_body()
                 .read_to_string()
-                .map_err(|e| download_error(&url, e))?;
+                .map_err(|e| download::download_error(&url, e))?;
             fsutil::atomic_write(&path, body.as_bytes())?;
         }
         let text = fs::read_to_string(&path).map_err(ZemError::io(&path))?;
@@ -186,101 +183,16 @@ impl SdkStore<'_> {
             asset: asset.to_string(),
         })?;
         let path = self.downloads_dir().join(asset);
-        if path.is_file() && file_sha256(&path)? == *expected {
-            return Ok(path);
-        }
-
-        let url = self.url(asset);
-        let response = http_get(&url)?;
-        let total = response.body().content_length();
-        let partial = path.with_extension("part");
-        fsutil::create_dir_all(&self.downloads_dir())?;
-        let mut file = File::create(&partial).map_err(ZemError::io(&partial))?;
-        let progress = progress_bar(asset, total);
-        let mut reader = response.into_body().into_reader();
-        let mut hasher = Sha256::new();
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            let n = reader.read(&mut buf).map_err(|e| download_error(&url, e))?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-            file.write_all(&buf[..n]).map_err(ZemError::io(&partial))?;
-            progress.inc(n as u64);
-        }
-        progress.finish_and_clear();
-        drop(file);
-
-        let actual = hex(&hasher.finalize());
-        if actual != *expected {
-            let _ = fs::remove_file(&partial);
-            return Err(ZemError::ChecksumMismatch {
-                file: path,
-                expected: expected.clone(),
-                actual,
-            });
-        }
-        fs::rename(&partial, &path).map_err(ZemError::io(&path))?;
+        download::fetch_verified(&self.url(asset), &path, expected, asset)?;
         Ok(path)
     }
-}
-
-fn http_get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
-    platform::http_agent()
-        .get(url)
-        .header("User-Agent", concat!("zem/", env!("CARGO_PKG_VERSION")))
-        .call()
-        .map_err(|e| download_error(url, e))
-}
-
-fn download_error(url: &str, e: impl std::fmt::Display) -> ZemError {
-    ZemError::Download {
-        url: url.to_string(),
-        message: e.to_string(),
-    }
-}
-
-fn progress_bar(name: &str, total: Option<u64>) -> ProgressBar {
-    if !io::stderr().is_terminal() {
-        return ProgressBar::hidden();
-    }
-    let bar = match total {
-        Some(len) => ProgressBar::new(len),
-        None => ProgressBar::new_spinner(),
-    };
-    bar.set_style(
-        ProgressStyle::with_template("      {msg} [{bar:30}] {bytes}/{total_bytes}")
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("=> "),
-    );
-    bar.set_message(name.to_string());
-    bar
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn file_sha256(path: &Path) -> Result<String> {
-    let mut file = BufReader::new(File::open(path).map_err(ZemError::io(path))?);
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf).map_err(ZemError::io(path))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex(&hasher.finalize()))
 }
 
 /// Extract into a temp dir next to the destination (same filesystem, so the final rename is
 /// atomic) and check that the archive contains `top/`.
 fn extract_staged(archive: &Path, parent: &Path, top: &str) -> Result<tempfile::TempDir> {
     let staged = tempfile::Builder::new()
-        .prefix(".zem-extract-")
+        .prefix(EXTRACT_PREFIX)
         .tempdir_in(parent)
         .map_err(ZemError::io(parent))?;
     platform::extract_sdk_archive(archive, staged.path()).map_err(ZemError::io(archive))?;

@@ -4,6 +4,7 @@ use super::{Check, Report, Status};
 use crate::config::{self, LoadedConfig};
 use crate::home::ZemHome;
 use crate::platform::{self, Os, SerialAccess};
+use crate::store::uv::{UvRelease, UvStore};
 use crate::tools::{self, MIN_CMAKE, Probe, ToolSpec};
 use crate::{serial, session, sync};
 
@@ -95,26 +96,55 @@ fn missing(status: Status, spec: &ToolSpec, detail: &str) -> Check {
 }
 
 fn required_tool_checks() -> Vec<Check> {
-    let mut checks = Vec::new();
+    vec![
+        match tools::probe(&tools::GIT) {
+            Some(p) => Check::new(Status::Ok, "git", describe(&p)),
+            None => missing(Status::Fail, &tools::GIT, "not found (required by west)"),
+        },
+        uv_check(),
+    ]
+}
 
-    checks.push(match tools::probe(&tools::GIT) {
-        Some(p) => Check::new(Status::Ok, "git", describe(&p)),
-        None => missing(Status::Fail, &tools::GIT, "not found (required by west)"),
-    });
-
-    checks.push(match tools::probe(&tools::UV) {
-        Some(p) => Check::new(
-            Status::Ok,
+fn uv_check() -> Check {
+    let release = match UvRelease::pinned() {
+        Ok(release) => release,
+        Err(err) => return Check::new(Status::Fail, "uv", err.to_string()),
+    };
+    let version = release.version.clone();
+    let host_uv = tools::probe(&tools::UV);
+    let check = match ZemHome::resolve() {
+        Ok(home) => {
+            let store = UvStore {
+                home: &home,
+                release,
+            };
+            if store.installed() {
+                Check::new(
+                    Status::Ok,
+                    "uv",
+                    format!("{version} (managed by zem, {})", store.binary().display()),
+                )
+            } else {
+                Check::new(
+                    Status::Info,
+                    "uv",
+                    format!("{version} will be downloaded by `zem sync`"),
+                )
+            }
+        }
+        Err(_) => Check::new(
+            Status::Info,
             "uv",
-            format!("{} — manages Python for zem", describe(&p)),
+            format!("{version} will be downloaded by `zem sync`"),
         ),
-        None => missing(
-            Status::Fail,
-            &tools::UV,
-            "not found (required to manage Python environments)",
-        ),
-    });
-    checks
+    };
+    match host_uv {
+        Some(p) => check.hint(Some(format!(
+            "host uv {} is ignored; zem uses its own pinned copy",
+            describe(&p)
+        ))),
+        None => check,
+    }
 }
 
 fn build_tool_checks(host_tools_via_pip: bool) -> Vec<Check> {

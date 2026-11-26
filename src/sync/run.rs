@@ -17,7 +17,8 @@ use crate::process::Runner;
 use crate::project::{ProjectState, STATE_SCHEMA, StoreRef, TargetState};
 use crate::store::registry::{self, ProjectEntry};
 use crate::store::sdk::{self, SdkStore};
-use crate::store::venv::{self, Outcome, VenvStore};
+use crate::store::uv::{UvRelease, UvStore};
+use crate::store::venv::{Outcome, VenvStore};
 use crate::store::workspace::{WorkspaceStore, resolve_branch};
 use crate::store::{self as stores};
 
@@ -198,18 +199,28 @@ fn run_steps(
     let env = sync_env(home, &plan, cfg);
 
     steps.begin("Python environment");
-    let uv = venv::resolve_uv(&env)?;
+    let uv = UvStore {
+        home,
+        release: UvRelease::pinned()?,
+    }
+    .ensure()?;
+    if uv.fetched {
+        eprintln!("      {} downloaded uv {}", style("·").dim(), uv.version);
+    }
     let venv = VenvStore {
         dir: &plan.venv_dir,
         cfg: &cfg.python,
         env: &env,
         runner: &runner,
     };
-    let created = venv.ensure_bootstrap(&uv, constraints.as_deref())?;
+    let created = venv.ensure_bootstrap(&uv.path, constraints.as_deref())?;
     steps.done(outcome(
         created,
         &format!("reused {venv_key}"),
-        &format!("created {venv_key} with uv (Python {})", cfg.python.version),
+        &format!(
+            "created {venv_key} with uv {} (Python {})",
+            uv.version, cfg.python.version
+        ),
     ));
 
     steps.begin(&format!("Zephyr workspace {}", cfg.zephyr.version));
@@ -263,7 +274,8 @@ fn run_steps(
 
     steps.begin("Python requirements");
     let locked_packages = pins.packages.as_deref().zip(constraints.as_deref());
-    let (created, packages) = venv.ensure_requirements(&uv, &ws.zephyr_base, locked_packages)?;
+    let (created, packages) =
+        venv.ensure_requirements(&uv.path, &ws.zephyr_base, locked_packages)?;
     if let Some(locked) = &pins.packages
         && *locked != packages
     {

@@ -32,6 +32,7 @@ toml = "1.2.3"
 which = "8.0.6"
 
 [target.'cfg(unix)'.dependencies]
+flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 liblzma = { version = "0.4.9", default-features = false, features = ["static"] }
 tar = { version = "0.4.46", default-features = false }
 ureq = "3.5.2"

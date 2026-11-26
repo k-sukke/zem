@@ -49,8 +49,11 @@ zem tries to solve these with the following principles:
 
 - macOS or Linux
 - git
-- [uv](https://docs.astral.sh/uv/) (zem provisions Python itself through uv)
-- Rust 1.89+ to build zem
+- Rust 1.89+ (only to build zem from source)
+
+You do not need to install uv or Python. On the first `zem sync`, zem downloads its own pinned
+[uv](https://docs.astral.sh/uv/) into `~/.zem/tools` (checksum-verified; a uv on your `PATH` is ignored),
+and uv provisions Python. To fetch uv from a mirror, set `ZEM_UV_BASE_URL` (same layout as GitHub releases).
 
 cmake and ninja are installed into the venv via pip by default, so they are not required on the host. `dtc` is recommended.
 Run `zem doctor` to see what is missing.
@@ -138,7 +141,7 @@ zem sync
 
 Sync runs seven steps. When nothing has changed, subsequent runs finish in under a second.
 
-1. Python environment (create a venv with uv and install west)
+1. Python environment (download uv if needed, create a venv with it and install west)
 2. Zephyr workspace (`west init` / `west update`, shallow-fetching only the required modules)
 3. Board check (against Zephyr's `board.yml` / `soc.yml`)
 4. Zephyr's Python requirements
@@ -231,6 +234,7 @@ The project's `.zem/` holds only lightweight files and is git-ignored.
 ├── venvs/        # Python environments
 ├── sdk/          # Zephyr SDK (only the toolchains you need)
 ├── python/       # Python interpreters managed by uv
+├── tools/        # the pinned uv zem downloads
 └── cache/        # uv / ccache caches
 ```
 

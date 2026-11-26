@@ -192,7 +192,6 @@ version = "auto"                # "auto" なら zephyr/SDK_VERSION に従う
 
 [python]
 version = "3.12"
-installer = "auto"              # "auto"（uv があれば uv）| "uv" | "venv"
 host_tools_via_pip = true       # cmake / ninja を PyPI ホイールで venv に入れる
 extra_requirements = []
 
@@ -269,7 +268,6 @@ pub struct Sdk { #[serde(default)] pub version: SdkVersion }   // Auto | Exact(S
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Python {
     pub version: String,
-    pub installer: PyInstaller,                                 // Auto | Uv | Venv
     pub host_tools_via_pip: bool,
     pub extra_requirements: Vec<String>,
 }
@@ -391,12 +389,11 @@ OS 標準のキャッシュディレクトリ（`~/Library/Caches` や `%LOCALAP
 ├── sdk/
 │   └── zephyr-sdk-0.17.x/          # ツールチェーンは必要な分だけ追加される
 ├── python/                         # uv が管理する Python 本体（UV_PYTHON_INSTALL_DIR）
-├── tools/                          # 将来用: zem が取得するホストツール（Windows の dtc など）
+├── tools/                          # zem が取得するホストツール。現状は固定版の uv（uv-<ver>/uv）。将来: Windows の dtc など
 ├── cache/
 │   ├── git/                        # 将来用: git ミラー（west の --name-cache は既存キャッシュを読むだけで作らないため、zem が管理する。Phase 4）
-│   ├── downloads/                  # SDK の sha256.sum（アーカイブは展開後に削除）
+│   ├── downloads/                  # SDK の sha256.sum と uv のアーカイブ（どちらも展開後に削除）
 │   ├── uv/                         # UV_CACHE_DIR
-│   ├── pip/                        # PIP_CACHE_DIR（venv フォールバック時）
 │   ├── ccache/                     # CCACHE_DIR
 │   └── zephyr/                     # Zephyr の CMake ユーザーキャッシュ（-DUSER_CACHE_DIR）
 ├── westconfig                      # WEST_CONFIG_GLOBAL / SYSTEM の差し替え先（空ファイル）
@@ -491,6 +488,12 @@ manifest:
   - `<host>` は `macos-aarch64` / `macos-x86_64` / `linux-x86_64` / `linux-aarch64` / `windows-x86_64`（Windows は `.7z`）。platform 層が決める
   - SDK のバージョンは `zephyr/SDK_VERSION` に従う（v4.2.0 では `0.17.2`）
 - Zephyr SDK の `setup.sh` / `setup.cmd` は実行しない（実行すると `~/.cmake/packages` などに登録され、ユーザー環境が変わるため）。
+- **uv**: ホストの uv は使わず、zem が固定版を `tools/uv-<ver>/` に取得する（セットアップをワンタッチにするため。ホストの PATH・brew・`~/.local/bin` には触れない）。
+  1. `https://github.com/astral-sh/uv/releases/download/<ver>/uv-<target>.tar.gz` を `cache/downloads/uv-<ver>/` に取得し、**zem のコードに埋め込んだ sha256** と照合する（`store/uv.rs` の `CHECKSUMS`。uv を上げるときは版と全ターゲットのハッシュを更新する）
+  2. 一時ディレクトリに展開してから `tools/uv-<ver>/` へ rename し、最後に完了マーカーを書く。マーカーがなければ未インストール扱い
+  3. `<target>` は `aarch64-apple-darwin` / `x86_64-apple-darwin` / `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`（Linux は静的リンクの musl 版。platform 層が決める）
+  - 取得は `zem sync` が必要になった時点で自動で行う（ZEM_HOME の中だけで完結し、sync が元々 SDK やワークスペースを取得するのと同じ性質のため、確認は求めない）
+  - ミラー用に `ZEM_UV_BASE_URL`（`<base>/<ver>/uv-<target>.tar.gz` の配置は GitHub と同じ）。ハッシュ検証はミラーでも行う
 
 ### 4.6 環境変数の組み立て（EnvBuilder）
 
@@ -517,7 +520,6 @@ manifest:
 | `WEST_CONFIG_GLOBAL` / `WEST_CONFIG_SYSTEM` | `<ZEM_HOME>/westconfig` |
 | `PYTHONNOUSERSITE` | `1` |
 | `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` | `<ZEM_HOME>/cache/uv` / `<ZEM_HOME>/python` |
-| `PIP_CACHE_DIR` | `<ZEM_HOME>/cache/pip` |
 | `CCACHE_DIR` | `<ZEM_HOME>/cache/ccache` |
 | `ZEM_ACTIVE` | `1`（入れ子実行の検出とプロンプト表示用） |
 
@@ -592,8 +594,8 @@ manifest:
 **タスク**
 1. `store/mod.rs`（完了マーカー、ロック）、`fsutil.rs`（アトミック書き込み）、`sync/plan.rs`（`--dry-run` で「何を作るか・何を再利用するか」を表示）
 2. `store/venv.rs`
-   - uv がある場合: `uv venv <path> --python <ver> --python-preference only-managed` → `uv pip install --python <venv の python> west [cmake ninja]`（スパイクでは、指定しないとホストの Python 3.12.7 が使われた。再現性のため uv 管理の Python に固定する）
-   - uv がない場合: `python3 -m venv` + `pip`
+   - uv のみを使う（`python -m venv` へのフォールバックはない）: `uv venv <path> --python <ver> --python-preference only-managed` → `uv pip install --python <venv の python> west [cmake ninja]`（スパイクでは、指定しないとホストの Python 3.12.7 が使われた。再現性のため uv 管理の Python に固定する）
+   - uv 本体は zem が `store/uv.rs` で取得する（§4.5）。ホストの PATH にある uv は使わない
    - ワークスペース準備後に `requirements-base.txt` を入れる（2 段階）
 3. `manifest/`: feature → プロジェクト名、和集合での west.yml 生成
 4. `store/workspace.rs`: 初回は `west init -l` + `west update --narrow -o=--depth=1`、モジュール追加時は west.yml を再生成して引数なしの `west update` を実行する
@@ -743,7 +745,7 @@ manifest:
 - **gperf / OpenOCD / QEMU / JTAG デバッグ**: 対象外。書き込みは esptool（シリアル）のみ
 - **sysbuild / MCUboot / マルチイメージ**: 対象外（`cmake_args` や `zem run` で使うことは妨げない）
 - **単一ターゲット**: `zem.toml` に書けるボードは 1 つ
-- **HTTP 通信は SDK 取得のみ自前で行う**: それ以外のダウンロードは west / uv / git 経由。プロキシは `HTTPS_PROXY` 環境変数に従う
+- **HTTP 通信は zem 自身が行うのは SDK と uv の取得のみ**: それ以外のダウンロードは west / uv / git 経由。プロキシは `HTTPS_PROXY` 環境変数に従う
 - **ESP-IDF との共存は「除外」のみ**: IDF の環境を読み取って再利用するような統合はしない
 - **自動 sync はしない**: `build` は不整合を検出したら止めるだけ（暗黙の巨大ダウンロードを避ける）
 

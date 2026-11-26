@@ -146,6 +146,30 @@ fn read_json(path: &Path) -> Value {
 }
 
 #[test]
+#[ignore = "downloads uv from GitHub; run explicitly"]
+fn downloads_the_pinned_uv_and_it_runs() {
+    use zem::home::ZemHome;
+    use zem::store::uv::{UV_VERSION, UvRelease, UvStore};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let home = ZemHome::new(tmp.path().to_path_buf());
+    let store = UvStore {
+        home: &home,
+        release: UvRelease::pinned().unwrap(),
+    };
+    let uv = store.ensure().unwrap();
+    assert!(uv.fetched);
+
+    let out = std::process::Command::new(&uv.path)
+        .arg("--version")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains(UV_VERSION), "{text}");
+    assert!(!store.ensure().unwrap().fetched);
+}
+
+#[test]
 #[ignore = "downloads Zephyr; run explicitly"]
 fn projects_share_one_workspace_and_modules_are_additive() {
     let env = Env::new();

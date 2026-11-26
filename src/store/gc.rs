@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use super::EXTRACT_PREFIX;
 use super::registry::{self, Registry};
 use super::sdk;
 use crate::config::CONFIG_FILE_NAME;
@@ -17,7 +18,6 @@ use crate::home::ZemHome;
 use crate::project::{PROJECT_STATE_DIR, ProjectState, STATE_FILE};
 
 const SDK_DIR_PREFIX: &str = "zephyr-sdk-";
-const EXTRACT_PREFIX: &str = ".zem-extract-";
 /// Extraction directories younger than this may belong to a sync that is still running.
 const LEFTOVER_AGE: Duration = Duration::from_secs(60 * 60);
 
@@ -242,6 +242,12 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
         });
     }
 
+    for (name, path) in subdirs(&home.tools_dir()) {
+        if name.starts_with(EXTRACT_PREFIX) && is_old(&path) {
+            stores.push(leftover(format!("tools/{name}"), path, None));
+        }
+    }
+
     for (name, path) in subdirs(&home.trash_dir()) {
         stores.push(leftover(format!("trash/{name}"), path, None));
     }
@@ -250,7 +256,10 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
 }
 
 fn shared(home: &ZemHome) -> Vec<(String, u64)> {
-    let mut dirs = vec![("python".to_string(), home.python_dir())];
+    let mut dirs = vec![
+        ("python".to_string(), home.python_dir()),
+        ("tools".to_string(), home.tools_dir()),
+    ];
     dirs.extend(
         subdirs(&home.cache_dir())
             .into_iter()

@@ -9,7 +9,7 @@ use crate::home::{VenvKey, WorkspaceKey, ZemHome};
 use crate::lockfile::{self, Lockfile};
 use crate::manifest::project_modules;
 use crate::project::ProjectDir;
-use crate::store::venv;
+use crate::store::{uv, venv};
 
 /// Everything `zem sync` will create or reuse for a project, resolved without network access.
 #[derive(Debug, Clone)]
@@ -153,6 +153,7 @@ impl SyncPlan {
             ("ZEM_HOME", self.zem_home.display().to_string()),
             ("workspace", workspace),
             ("venv", self.venv_dir.display().to_string()),
+            ("uv", format!("{} (managed by zem)", uv::UV_VERSION)),
             ("sdk", sdk),
             ("lock", lock),
             (

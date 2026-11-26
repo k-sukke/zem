@@ -1,9 +1,11 @@
 //! Shared, content-addressed stores under ZEM_HOME. Each store directory carries a marker
 //! file describing what is installed; a store without a valid marker is treated as absent.
 
+pub mod download;
 pub mod gc;
 pub mod registry;
 pub mod sdk;
+pub mod uv;
 pub mod venv;
 pub mod workspace;
 
@@ -19,6 +21,9 @@ use crate::lock::FileLock;
 
 pub const MARKER_FILE: &str = ".zem-store.json";
 pub const MARKER_SCHEMA: u32 = 1;
+/// Prefix of the temporary directories archives are unpacked into before being renamed into
+/// place; `zem cache gc` removes the ones an interrupted sync left behind.
+pub const EXTRACT_PREFIX: &str = ".zem-extract-";
 
 pub fn marker_path(dir: &Path) -> PathBuf {
     dir.join(MARKER_FILE)

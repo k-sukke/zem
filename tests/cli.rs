@@ -222,24 +222,38 @@ fn sync_reports_config_errors_with_location() {
 
 #[cfg(unix)]
 #[test]
-fn sync_without_uv_fails_before_downloading() {
+fn sync_ignores_host_uv_and_fails_cleanly_when_it_cannot_download() {
+    use std::os::unix::fs::PermissionsExt;
+
     let sb = Sandbox::new();
     sb.init("esp32c3_devkitm");
-    let path_without_uv = tempfile::tempdir().unwrap();
-    // Even if a host python3 exists on PATH, zem requires uv and does not fall back to venv.
-    let fake_python = path_without_uv.path().join("python3");
-    fs::write(&fake_python, "#!/bin/sh\necho Python 3.12.0\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&fake_python, fs::Permissions::from_mode(0o755)).unwrap();
-    }
+
+    // A uv on PATH must never be used: zem manages its own pinned copy.
+    let bin = tempfile::tempdir().unwrap();
+    let ran = bin.path().join("host-uv-ran");
+    let fake_uv = bin.path().join("uv");
+    fs::write(
+        &fake_uv,
+        format!("#!/bin/sh\ntouch '{}'\nexit 0\n", ran.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&fake_uv, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // Point the download at a port nothing listens on, so no network is needed.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mirror = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+
     sb.zem()
-        .env("PATH", path_without_uv.path())
+        .env("PATH", bin.path())
+        .env("ZEM_UV_BASE_URL", &mirror)
         .arg("sync")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("uv was not found"));
+        .stderr(predicate::str::contains("download of"))
+        .stderr(predicate::str::contains(&mirror));
+    assert!(!ran.exists(), "the uv on PATH was executed");
+
     let ignore = fs::read_to_string(sb.path().join(".zem").join(".gitignore")).unwrap();
     assert!(ignore.lines().any(|l| l == "*"));
     assert!(
@@ -248,6 +262,25 @@ fn sync_without_uv_fails_before_downloading() {
             .next()
             .is_none()
     );
+    assert!(
+        !sb.zem_home
+            .path()
+            .join("tools")
+            .read_dir()
+            .is_ok_and(|mut d| d.any(|e| e.is_ok_and(|e| e.file_name() == "uv-0.13.10"))),
+        "a failed download must not leave an installed uv"
+    );
+}
+
+#[test]
+fn sync_dry_run_shows_the_managed_uv() {
+    let sb = Sandbox::new();
+    sb.init("esp32c3_devkitm");
+    sb.zem()
+        .args(["sync", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("managed by zem"));
 }
 
 #[test]
