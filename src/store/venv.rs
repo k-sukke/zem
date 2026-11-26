@@ -461,7 +461,14 @@ mod tests {
         })
         .unwrap_err();
 
-        let msg = format!("{err:?}");
+        // Compare the source's `Display` text: `{:?}` would escape Windows path backslashes.
+        let msg = match &err {
+            ZemError::Io { path, source } => {
+                assert_eq!(path, &dest);
+                source.to_string()
+            }
+            other => panic!("expected an I/O error, got {other:?}"),
+        };
         assert!(
             msg.contains(&backup.display().to_string()),
             "error should include backup path: {msg}"

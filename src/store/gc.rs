@@ -570,7 +570,22 @@ mod tests {
 
     fn backdate_dir(path: &Path) {
         let old = SystemTime::now() - LEFTOVER_AGE - Duration::from_secs(60);
-        fs::File::open(path).unwrap().set_modified(old).unwrap();
+        #[cfg(windows)]
+        let dir = {
+            // Directories can only be opened with backup semantics, and changing their
+            // timestamps needs FILE_WRITE_ATTRIBUTES rather than plain read access.
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            fs::OpenOptions::new()
+                .access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                .open(path)
+                .unwrap()
+        };
+        #[cfg(not(windows))]
+        let dir = fs::File::open(path).unwrap();
+        dir.set_modified(old).unwrap();
     }
 
     #[test]
