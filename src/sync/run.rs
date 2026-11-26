@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use console::style;
@@ -6,7 +7,7 @@ use console::style;
 use super::SyncPlan;
 use super::plan::short;
 use crate::board::{ResolutionSource, board_yml};
-use crate::config::{LoadedConfig, classify_revision};
+use crate::config::{LoadedConfig, ZemConfig, classify_revision};
 use crate::env::{EnvBuilder, EnvLocations, zem_env};
 use crate::error::{Result, ZemError};
 use crate::fsutil;
@@ -17,9 +18,11 @@ use crate::process::Runner;
 use crate::project::{ProjectState, STATE_SCHEMA, StoreRef, TargetState};
 use crate::store::registry::{self, ProjectEntry};
 use crate::store::sdk::{self, SdkStore};
-use crate::store::venv::{self, Outcome, VenvStore};
+use crate::store::uv::{self, UV_VERSION};
+use crate::store::venv::{self, Builder, Outcome};
 use crate::store::workspace::{WorkspaceStore, resolve_branch};
 use crate::store::{self as stores};
+use crate::tools;
 
 #[derive(Debug, Clone, Default)]
 pub struct SyncOptions {
@@ -89,17 +92,29 @@ fn outcome(o: Outcome, reused: &str, created: &str) -> String {
     }
 }
 
-fn sync_env(home: &ZemHome, plan: &SyncPlan, cfg: &crate::config::ZemConfig) -> EnvBuilder {
+/// The isolated environment for commands run on behalf of a venv: its `bin` leads `PATH`.
+fn sync_env(home: &ZemHome, venv_dir: &Path, cfg: &ZemConfig) -> EnvBuilder {
     zem_env(
         &EnvLocations {
             home,
-            venv_dir: &plan.venv_dir,
+            venv_dir,
             zephyr_base: None,
             sdk_dir: None,
             west_config: None,
         },
         &cfg.env,
     )
+}
+
+/// Check the frozen packages of a new project venv against `zem.lock` before it is published.
+fn verify_packages(pins: &Pins, packages: &[String]) -> Result<()> {
+    match &pins.packages {
+        Some(locked) if locked.as_slice() != packages => {
+            let (removed, added) = package_diff(locked, packages);
+            pins.verify("python packages", Some(&removed), &added)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Pins only in `locked` and pins only in `actual`, for a readable mismatch message.
@@ -163,16 +178,15 @@ fn run_steps(
     }
     fsutil::touch(&home.westconfig_path())?;
 
+    // Until the project venv exists, commands run with the shared west venv on PATH.
+    let west_env = sync_env(home, &plan.west_dir, cfg);
+    tools::require_in_env(&west_env, &tools::GIT)?;
+
     if plan.unresolved_branch
         || (opts.update && !classify_revision(&cfg.zephyr.version).is_immutable())
     {
         let revision = cfg.zephyr.version.trim();
-        let commit = resolve_branch(
-            &sync_env(home, &plan, cfg),
-            &runner,
-            &cfg.zephyr.url,
-            revision,
-        )?;
+        let commit = resolve_branch(&west_env, &runner, &cfg.zephyr.url, revision)?;
         eprintln!(
             "{} `{revision}` is at {}",
             style("pinning").dim(),
@@ -180,7 +194,6 @@ fn run_steps(
         );
         plan.pin_commit(loaded, home, &commit);
     }
-    plan.select_venv(home, pins.packages.as_deref());
     let constraints = match &pins.packages {
         Some(packages) => {
             let path = project.state_dir().join("constraints.txt");
@@ -191,38 +204,34 @@ fn run_steps(
     };
 
     let ws_key = plan.workspace_key.dir_name();
-    let venv_key = plan.venv_name.clone();
     let _ws_lock = stores::lock(home, &format!("workspace-{ws_key}"))?;
-    let _venv_lock = stores::lock(home, &format!("venv-{venv_key}"))?;
-
-    let env = sync_env(home, &plan, cfg);
+    // Held until the end of the sync: the venv must not change under the steps that use it.
+    let selected = venv::select_project(home, &plan.venv_name, pins.packages.as_deref())?;
 
     steps.begin("Python environment");
-    let installer = venv::resolve_installer(&cfg.python, &env)?;
-    let venv = VenvStore {
-        dir: &plan.venv_dir,
-        cfg: &cfg.python,
-        env: &env,
-        runner: &runner,
-    };
-    let created = venv.ensure_bootstrap(&installer, constraints.as_deref())?;
-    steps.done(outcome(
-        created,
-        &format!("reused {venv_key}"),
-        &format!(
-            "created {venv_key} with {} (Python {})",
-            installer.name(),
-            cfg.python.version
-        ),
+    let uv = uv::ensure(home)?;
+    let west_built = venv::ensure_west(
+        &Builder {
+            home,
+            uv: &uv.path,
+            env: &west_env,
+            runner: &runner,
+        },
+        &cfg.python.version,
+    )?;
+    steps.done(format!(
+        "uv {UV_VERSION} {}, west venv {}",
+        if uv.fetched { "downloaded" } else { "ready" },
+        outcome(west_built, "reused", "created")
     ));
 
     steps.begin(&format!("Zephyr workspace {}", cfg.zephyr.version));
-    let west = venv.west();
+    let west = venv::west_bin(&plan.west_dir);
     let workspace = WorkspaceStore {
         dir: &plan.workspace_dir,
         key: &plan.workspace_key,
         west: &west,
-        env: &env,
+        env: &west_env,
         runner: &runner,
     };
     let ws = workspace.ensure(&plan.modules, opts.update)?;
@@ -266,15 +275,20 @@ fn run_steps(
     ));
 
     steps.begin("Python requirements");
-    let locked_packages = pins.packages.as_deref().zip(constraints.as_deref());
-    let (created, packages) =
-        venv.ensure_requirements(&installer, &ws.zephyr_base, locked_packages)?;
-    if let Some(locked) = &pins.packages
-        && *locked != packages
-    {
-        let (removed, added) = package_diff(locked, &packages);
-        pins.verify("python packages", Some(&removed), &added)?;
-    }
+    let env = sync_env(home, &selected.dir, cfg);
+    let (created, packages) = venv::ensure_project(
+        &Builder {
+            home,
+            uv: &uv.path,
+            env: &env,
+            runner: &runner,
+        },
+        &cfg.python,
+        &selected,
+        &ws.zephyr_base,
+        pins.packages.as_deref().zip(constraints.as_deref()),
+        |packages| verify_packages(&pins, packages),
+    )?;
     steps.done(outcome(
         created,
         &format!("up to date ({} packages)", packages.len()),
@@ -298,8 +312,12 @@ fn run_steps(
     steps.begin("Binary blobs");
     let mut blob_env = env.clone();
     blob_env.set("ZEPHYR_BASE", &ws.zephyr_base);
+    // The project venv's west, not the shared one: `west blobs` needs Zephyr's requirements
+    // (requests and friends) that only the project venv has.
+    let project_west = venv::west_bin(&selected.dir);
     let fetched = WorkspaceStore {
         env: &blob_env,
+        west: &project_west,
         ..workspace
     }
     .ensure_blobs(
@@ -347,8 +365,8 @@ fn run_steps(
         zephyr_base: ws.zephyr_base.clone(),
         modules,
         venv: StoreRef {
-            key: venv_key.clone(),
-            path: plan.venv_dir.clone(),
+            key: selected.name.clone(),
+            path: selected.dir.clone(),
         },
         sdk: Some(StoreRef {
             key: sdk_version.clone(),
@@ -384,7 +402,7 @@ fn run_steps(
         project.root(),
         ProjectEntry {
             workspace: ws_key,
-            venv: venv_key,
+            venv: selected.name.clone(),
             sdk: Some(sdk_version),
             last_sync: synced_at,
         },

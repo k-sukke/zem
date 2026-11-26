@@ -2,7 +2,7 @@ pub mod keys;
 
 use std::path::{Path, PathBuf};
 
-pub use keys::{VenvKey, WorkspaceKey};
+pub use keys::{VenvKey, WestVenvKey, WorkspaceKey};
 
 use crate::error::{Result, ZemError};
 use crate::platform;
@@ -75,10 +75,6 @@ impl ZemHome {
         self.cache_dir().join("uv")
     }
 
-    pub fn pip_cache_dir(&self) -> PathBuf {
-        self.cache_dir().join("pip")
-    }
-
     pub fn ccache_dir(&self) -> PathBuf {
         self.cache_dir().join("ccache")
     }
@@ -119,6 +115,25 @@ impl ZemHome {
 
     pub fn sdk_install_dir(&self, version: &str) -> PathBuf {
         self.sdk_dir().join(format!("zephyr-sdk-{version}"))
+    }
+
+    /// Verified release downloads waiting to be unpacked (sdk, uv).
+    pub fn downloads_dir(&self) -> PathBuf {
+        self.cache_dir().join("downloads")
+    }
+
+    /// Directory holding the uv release `version` (contains `uv` and `uvx`).
+    pub fn uv_dir(&self, version: &str) -> PathBuf {
+        self.tools_dir().join("uv").join(version)
+    }
+
+    pub fn uv_bin(&self, version: &str) -> PathBuf {
+        self.uv_dir(version).join(crate::platform::exe_name("uv"))
+    }
+
+    /// Shared, read-mostly venvs for west (never garbage-collected as project venvs are).
+    pub fn west_venv_dir(&self, key: &WestVenvKey) -> PathBuf {
+        self.tools_dir().join("west").join(key.dir_name())
     }
 }
 

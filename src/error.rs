@@ -110,6 +110,17 @@ pub enum ZemError {
         advice: Option<String>,
     },
 
+    #[error("{tool} {version} has no release asset `{asset}`")]
+    #[diagnostic(
+        code(zem::tool::asset),
+        help("this host may not be supported by that release")
+    )]
+    ToolAsset {
+        tool: &'static str,
+        version: String,
+        asset: String,
+    },
+
     #[error("module `{module}` does not exist in Zephyr {revision}'s west.yml")]
     #[diagnostic(
         code(zem::modules::unknown),

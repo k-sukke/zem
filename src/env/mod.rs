@@ -158,7 +158,6 @@ pub fn zem_env_from(mut env: EnvBuilder, loc: &EnvLocations<'_>, config: &EnvCon
     env.set("PYTHONNOUSERSITE", "1");
     env.set("UV_CACHE_DIR", home.uv_cache_dir());
     env.set("UV_PYTHON_INSTALL_DIR", home.python_dir());
-    env.set("PIP_CACHE_DIR", home.pip_cache_dir());
     env.set("CCACHE_DIR", home.ccache_dir());
     if let Some(base) = loc.zephyr_base {
         env.set("ZEPHYR_BASE", base);

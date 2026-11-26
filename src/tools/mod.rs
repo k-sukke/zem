@@ -1,7 +1,10 @@
+use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::env::EnvBuilder;
+use crate::error::{Result, ZemError};
 use crate::platform;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,11 +55,6 @@ pub const GIT: ToolSpec = ToolSpec {
     candidates: &["git"],
     version_args: &["--version"],
 };
-pub const UV: ToolSpec = ToolSpec {
-    name: "uv",
-    candidates: &["uv"],
-    version_args: &["--version"],
-};
 pub const CMAKE: ToolSpec = ToolSpec {
     name: "cmake",
     candidates: &["cmake"],
@@ -78,21 +76,25 @@ pub const WEST: ToolSpec = ToolSpec {
     version_args: &["--version"],
 };
 
-pub fn python() -> ToolSpec {
-    ToolSpec {
-        name: "python",
-        candidates: platform::python_candidates(),
-        version_args: &["--version"],
-    }
-}
-
-pub const MIN_PYTHON: Version = Version::new(3, 10, 0);
 pub const MIN_CMAKE: Version = Version::new(3, 20, 5);
 
 #[derive(Debug, Clone)]
 pub struct Probe {
     pub path: PathBuf,
     pub version: Option<Version>,
+}
+
+/// Find a tool in the PATH of a zem environment (not the host's), failing with an install hint.
+pub fn require_in_env(env: &EnvBuilder, spec: &ToolSpec) -> Result<PathBuf> {
+    let path = env.get("PATH").unwrap_or(OsStr::new(""));
+    let cwd = std::env::current_dir().map_err(ZemError::io("."))?;
+    spec.candidates
+        .iter()
+        .find_map(|candidate| which::which_in(candidate, Some(path), &cwd).ok())
+        .ok_or_else(|| ZemError::ToolNotFound {
+            tool: spec.name,
+            advice: platform::install_hint(spec.name).map(|hint| hint.to_string()),
+        })
 }
 
 /// Locate a tool on PATH (honouring PATHEXT on Windows) and read its version.
@@ -141,6 +143,6 @@ mod tests {
     #[test]
     fn version_ordering() {
         assert!(Version::new(3, 20, 5) > Version::new(3, 20, 0));
-        assert!(Version::new(3, 9, 0) < MIN_PYTHON);
+        assert!(Version::new(3, 9, 0) < Version::new(3, 10, 0));
     }
 }

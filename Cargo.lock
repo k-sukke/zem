@@ -1819,6 +1819,7 @@ dependencies = [
  "console",
  "dialoguer",
  "dunce",
+ "flate2",
  "home",
  "indicatif",
  "insta",

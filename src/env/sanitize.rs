@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::platform;
 
-pub const DENY_PREFIXES: &[&str] = &["IDF_", "ZEPHYR_", "CONDA_", "PIP_", "WEST_CONFIG_"];
+pub const DENY_PREFIXES: &[&str] = &["IDF_", "ZEPHYR_", "CONDA_", "PIP_", "UV_", "WEST_CONFIG_"];
 
 pub const DENY_EXACT: &[&str] = &[
     "VIRTUAL_ENV",
@@ -92,6 +92,7 @@ mod tests {
             "VIRTUAL_ENV",
             "CONDA_PREFIX",
             "WEST_CONFIG_LOCAL",
+            "UV_INDEX_URL",
         ] {
             assert!(is_denied(OsStr::new(key)), "{key}");
         }

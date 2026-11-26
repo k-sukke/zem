@@ -84,7 +84,7 @@ board = "esp32c3_devkitm"
         let cfg = parse(Path::new("zem.toml"), MINIMAL).unwrap();
         assert_eq!(cfg.zephyr.url, super::super::DEFAULT_ZEPHYR_URL);
         assert_eq!(cfg.python.version, "3.12");
-        assert!(cfg.python.host_tools_via_pip);
+        assert!(cfg.python.install_cmake_ninja);
         assert_eq!(cfg.build.dir.as_str(), "build");
     }
 
