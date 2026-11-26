@@ -202,6 +202,7 @@ pub fn run_replacing(cmd: Command) -> ZemError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // Non-NotApplicable variants are only constructed on Linux.
 pub enum SerialAccess {
     Ok,
     MissingGroup { candidates: &'static [&'static str] },
