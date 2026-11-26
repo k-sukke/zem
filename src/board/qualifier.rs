@@ -57,10 +57,6 @@ impl BoardId {
         self.qualifiers.first().map(String::as_str)
     }
 
-    pub fn cpucluster(&self) -> Option<&str> {
-        self.qualifiers.get(1).map(String::as_str)
-    }
-
     pub fn with_qualifiers(&self, qualifiers: &str) -> BoardId {
         BoardId {
             qualifiers: qualifiers.split('/').map(str::to_string).collect(),
@@ -105,7 +101,7 @@ mod tests {
     fn parses_full_qualifiers() {
         let id = BoardId::parse("esp32s3_devkitc/esp32s3/procpu").unwrap();
         assert_eq!(id.soc(), Some("esp32s3"));
-        assert_eq!(id.cpucluster(), Some("procpu"));
+        assert_eq!(id.qualifiers, ["esp32s3", "procpu"]);
         assert_eq!(id.to_string(), "esp32s3_devkitc/esp32s3/procpu");
     }
 

@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{Result, ZemError};
 use crate::fsutil;
+use crate::home::keys::hex;
 use crate::platform;
 
 pub fn http_get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
@@ -25,10 +26,6 @@ pub fn download_error(url: &str, e: impl std::fmt::Display) -> ZemError {
         url: url.to_string(),
         message: e.to_string(),
     }
-}
-
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub fn file_sha256(path: &Path) -> Result<String> {

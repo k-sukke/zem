@@ -7,10 +7,9 @@ use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::thread;
 
-use sha2::{Digest, Sha256};
 use zem::ZemError;
 use zem::home::ZemHome;
-use zem::store::download::hex;
+use zem::home::keys::sha256_hex;
 use zem::store::uv::{UV_VERSION, UvRelease, UvStore};
 
 const TARGET: &str = "test-target";
@@ -31,7 +30,7 @@ fn archive(file: &str) -> Vec<u8> {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
+    sha256_hex(bytes)
 }
 
 /// Serve `body` for `/<version>/uv-<target>.tar.gz` to the next `connections` requests and

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Sender};
@@ -35,14 +35,6 @@ impl Runner {
             log_path,
             verbose,
         })
-    }
-
-    pub fn verbose(&self) -> bool {
-        self.verbose
-    }
-
-    pub fn log_path(&self) -> Option<&Path> {
-        self.log_path.as_deref()
     }
 
     pub fn note(&self, line: &str) {

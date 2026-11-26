@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{EXTRACT_PREFIX, MARKER_SCHEMA, read_marker, write_marker};
+use super::{MARKER_SCHEMA, read_marker, staging_dir, write_marker};
 use crate::config::Python;
 use crate::env::EnvBuilder;
 use crate::error::{Result, ZemError};
@@ -87,10 +87,7 @@ impl VenvStore<'_> {
             message: "venv path has no parent directory".to_string(),
         })?;
         fsutil::create_dir_all(parent)?;
-        let staged = tempfile::Builder::new()
-            .prefix(EXTRACT_PREFIX)
-            .tempdir_in(parent)
-            .map_err(ZemError::io(parent))?;
+        let staged = staging_dir(parent)?;
         let staged_venv = staged.path().join("venv");
 
         let mut cmd = self.env.command(uv);

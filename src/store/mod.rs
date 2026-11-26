@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::Result;
+use crate::error::{Result, ZemError};
 use crate::fsutil;
 use crate::home::ZemHome;
 use crate::lock::FileLock;
@@ -24,6 +24,14 @@ pub const MARKER_SCHEMA: u32 = 1;
 /// Prefix of the temporary directories archives are unpacked into before being renamed into
 /// place; `zem cache gc` removes the ones an interrupted sync left behind.
 pub const EXTRACT_PREFIX: &str = ".zem-extract-";
+
+/// Temporary directory next to a store's final path so the final rename is atomic.
+pub fn staging_dir(parent: &Path) -> Result<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix(EXTRACT_PREFIX)
+        .tempdir_in(parent)
+        .map_err(ZemError::io(parent))
+}
 
 pub fn marker_path(dir: &Path) -> PathBuf {
     dir.join(MARKER_FILE)

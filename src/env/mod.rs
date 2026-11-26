@@ -58,11 +58,6 @@ impl EnvBuilder {
         }
     }
 
-    pub fn remove(&mut self, key: impl AsRef<OsStr>) {
-        let key = key.as_ref();
-        self.vars.retain(|(k, _)| !platform::env_key_eq(k, key));
-    }
-
     pub fn vars(&self) -> impl Iterator<Item = (&OsStr, &OsStr)> {
         self.vars
             .iter()

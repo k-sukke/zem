@@ -66,11 +66,25 @@ pub fn diff(current: &EnvBuilder, target: &EnvBuilder) -> EnvDiff {
     out
 }
 
-fn single_quote(value: &str) -> String {
+pub fn posix_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
-fn fish_quote(value: &str) -> String {
+/// Quote `value` for POSIX shells / `shlex.split` only when it is empty or contains characters
+/// that could be interpreted specially.
+pub fn posix_quote_if_needed(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_=./:;,+@".contains(c))
+    {
+        value.to_string()
+    } else {
+        posix_quote(value)
+    }
+}
+
+pub fn fish_quote(value: &str) -> String {
     format!("'{}'", value.replace('\\', r"\\").replace('\'', r"\'"))
 }
 
@@ -82,7 +96,7 @@ pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
                 out.push_str(&format!("unset {key}\n"));
             }
             for (key, value) in &diff.set {
-                out.push_str(&format!("export {key}={}\n", single_quote(value)));
+                out.push_str(&format!("export {key}={}\n", posix_quote(value)));
             }
         }
         ShellKind::Fish => {

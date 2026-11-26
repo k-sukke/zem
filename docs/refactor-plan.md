@@ -23,20 +23,20 @@
 振る舞いを変えずに不要コードと重複を削る。
 
 ### デッドコード削除
-- [ ] `src/home/mod.rs`: `ZemHome::git_cache_dir()`、`ZemHome::config_path()` を削除
-- [ ] `src/platform/{mod,unix,windows}.rs`: `serial_port_hint()` を削除
-- [ ] `src/env/mod.rs`: `EnvBuilder::remove()` を削除
-- [ ] `src/process.rs`: `Runner::verbose()`、`Runner::log_path()` を削除
-- [ ] `src/board/qualifier.rs`: `BoardId::cpucluster()` を削除
-- [ ] `Cargo.toml`: `repository` と重複している `homepage` を削除
+- [x] `src/home/mod.rs`: `ZemHome::git_cache_dir()`、`ZemHome::config_path()` を削除
+- [x] `src/platform/{mod,unix,windows}.rs`: `serial_port_hint()` を削除
+- [x] `src/env/mod.rs`: `EnvBuilder::remove()` を削除
+- [x] `src/process.rs`: `Runner::verbose()`、`Runner::log_path()` を削除
+- [x] `src/board/qualifier.rs`: `BoardId::cpucluster()` を削除
+- [x] `Cargo.toml`: `repository` と重複している `homepage` を削除
 
 ### 重複実装の統合・整理
-- [ ] シェルクォート関数の共通化（`src/env/shell.rs`, `src/project/activate.rs`, `src/doctor/checks.rs`, `src/project/west_config.rs`）
-- [ ] `hex()` 関数の統合（`src/home/keys.rs` と `src/store/download.rs`）
-- [ ] `src/doctor/checks.rs`: `CONFLICTING_VARS` の独自リストを廃止し、`env::is_denied()` ベースに統一
-- [ ] `src/store/mod.rs`: `tempfile::Builder::new().prefix(EXTRACT_PREFIX).tempdir_in(...)` をヘルパー化し、`uv.rs` / `venv.rs` / `sdk.rs` から利用
-- [ ] `src/manifest/features.rs`: `module_for()` を削除し、`Feature::as_str()` を直接使用
-- [ ] `src/sync/run.rs`: `run_steps` 内で3回呼ばれている `sync_env()` を整理
+- [x] シェルクォート関数の共通化（`src/env/shell.rs`, `src/project/activate.rs`, `src/doctor/checks.rs`, `src/project/west_config.rs`）
+- [x] `hex()` 関数の統合（`src/home/keys.rs` と `src/store/download.rs`）
+- [x] `src/doctor/checks.rs`: `CONFLICTING_VARS` の独自リストを廃止し、`env::is_denied()` ベースに統一
+- [x] `src/store/mod.rs`: `tempfile::Builder::new().prefix(EXTRACT_PREFIX).tempdir_in(...)` をヘルパー化し、`uv.rs` / `venv.rs` / `sdk.rs` から利用
+- [x] `src/manifest/features.rs`: `module_for()` を削除し、`Feature::as_str()` を直接使用
+- [x] `src/sync/run.rs`: `run_steps` 内で3回呼ばれている `sync_env()` を整理
 
 ---
 

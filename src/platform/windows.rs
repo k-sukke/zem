@@ -76,10 +76,6 @@ pub fn to_cmake_path(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-pub fn serial_port_hint() -> &'static str {
-    "COM3"
-}
-
 pub fn serial_access() -> SerialAccess {
     SerialAccess::NotApplicable
 }

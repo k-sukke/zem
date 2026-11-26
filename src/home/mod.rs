@@ -67,10 +67,6 @@ impl ZemHome {
         self.root.join("cache")
     }
 
-    pub fn git_cache_dir(&self) -> PathBuf {
-        self.cache_dir().join("git")
-    }
-
     pub fn uv_cache_dir(&self) -> PathBuf {
         self.cache_dir().join("uv")
     }
@@ -101,10 +97,6 @@ impl ZemHome {
         self.root.join("projects.json")
     }
 
-    pub fn config_path(&self) -> PathBuf {
-        self.root.join("config.toml")
-    }
-
     pub fn workspace_dir(&self, key: &WorkspaceKey) -> PathBuf {
         self.workspaces_dir().join(key.dir_name())
     }
@@ -126,8 +118,8 @@ mod tests {
     fn layout_is_rooted() {
         let home = ZemHome::new(PathBuf::from("zh"));
         assert_eq!(
-            home.git_cache_dir(),
-            Path::new("zh").join("cache").join("git")
+            home.uv_cache_dir(),
+            Path::new("zh").join("cache").join("uv")
         );
         assert_eq!(
             home.sdk_install_dir("0.17.4"),

@@ -187,18 +187,14 @@ fn run_steps(
 
     // west runs git for every workspace update, and branch revisions need `git ls-remote`:
     // fail with an install hint before anything is downloaded.
-    tools::require_in_env(&sync_env(home, &plan, cfg), &tools::GIT)?;
+    let preflight_env = sync_env(home, &plan, cfg);
+    tools::require_in_env(&preflight_env, &tools::GIT)?;
 
     if plan.unresolved_branch
         || (opts.update && !classify_revision(&cfg.zephyr.version).is_immutable())
     {
         let revision = cfg.zephyr.version.trim();
-        let commit = resolve_branch(
-            &sync_env(home, &plan, cfg),
-            &runner,
-            &cfg.zephyr.url,
-            revision,
-        )?;
+        let commit = resolve_branch(&preflight_env, &runner, &cfg.zephyr.url, revision)?;
         eprintln!(
             "{} `{revision}` is at {}",
             style("pinning").dim(),

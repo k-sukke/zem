@@ -1,18 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::board::ResolvedTarget;
-use crate::config::{Feature, ZemConfig};
-
-/// West project name (in Zephyr's west.yml) providing a feature.
-pub fn module_for(feature: Feature) -> &'static str {
-    match feature {
-        Feature::Mbedtls => "mbedtls",
-        Feature::Lvgl => "lvgl",
-        Feature::Littlefs => "littlefs",
-        Feature::Mcuboot => "mcuboot",
-        Feature::Segger => "segger",
-    }
-}
+use crate::config::ZemConfig;
 
 /// Modules this project builds with; a subset of what the shared workspace contains.
 pub fn project_modules(config: &ZemConfig, target: &ResolvedTarget) -> BTreeSet<String> {
@@ -20,7 +9,7 @@ pub fn project_modules(config: &ZemConfig, target: &ResolvedTarget) -> BTreeSet<
         .hal_modules
         .iter()
         .copied()
-        .chain(config.modules.features.iter().map(|f| module_for(*f)))
+        .chain(config.modules.features.iter().map(|f| f.as_str()))
         .map(str::to_string)
         .chain(config.modules.extra.iter().cloned())
         .collect()

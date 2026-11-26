@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use crate::env::shell::posix_quote_if_needed;
 use crate::manifest::MANIFEST_DIR;
 use crate::platform;
 
@@ -31,7 +32,10 @@ pub fn render(c: &WestConfigInputs<'_>) -> String {
         "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF".to_string(),
     ];
     cmake_args.extend(c.cmake_args.iter().cloned());
-    let cmake_args: Vec<String> = cmake_args.iter().map(|a| shell_quote(a)).collect();
+    let cmake_args: Vec<String> = cmake_args
+        .iter()
+        .map(|a| posix_quote_if_needed(a))
+        .collect();
 
     let dir_fmt = c
         .build_dir
@@ -78,18 +82,6 @@ fn regex_escape(s: &str) -> String {
             escape.then_some('\\').into_iter().chain([c])
         })
         .collect()
-}
-
-/// `cmake-args` is split with Python's `shlex.split`.
-fn shell_quote(s: &str) -> String {
-    if !s.is_empty()
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_=./:;,+@".contains(c))
-    {
-        s.to_string()
-    } else {
-        format!("'{}'", s.replace('\'', r"'\''"))
-    }
 }
 
 #[cfg(test)]

@@ -2,25 +2,12 @@ use std::path::Path;
 
 use super::{Check, Report, Status};
 use crate::config::{self, LoadedConfig};
+use crate::env::{self, shell::posix_quote_if_needed};
 use crate::home::ZemHome;
 use crate::platform::{self, Os, SerialAccess};
 use crate::store::uv::{UvRelease, UvStore};
 use crate::tools::{self, MIN_CMAKE, Probe, ToolSpec};
 use crate::{serial, session, sync};
-
-const CONFLICTING_VARS: &[&str] = &[
-    "IDF_PATH",
-    "IDF_TOOLS_PATH",
-    "IDF_PYTHON_ENV_PATH",
-    "ZEPHYR_BASE",
-    "ZEPHYR_SDK_INSTALL_DIR",
-    "ZEPHYR_TOOLCHAIN_VARIANT",
-    "ESPRESSIF_TOOLCHAIN_PATH",
-    "VIRTUAL_ENV",
-    "CONDA_PREFIX",
-    "PYTHONPATH",
-    "PYTHONHOME",
-];
 
 const SYNCED_FOLDER_MARKERS: &[&str] = &["mobile documents", "onedrive", "dropbox", "google drive"];
 
@@ -212,11 +199,11 @@ fn build_tool_checks(host_tools_via_pip: bool) -> Vec<Check> {
 
 fn environment_checks() -> Vec<Check> {
     let mut checks = Vec::new();
-    let present: Vec<&str> = CONFLICTING_VARS
-        .iter()
-        .copied()
-        .filter(|name| std::env::var_os(name).is_some_and(|v| !v.is_empty()))
+    let mut present: Vec<String> = std::env::vars_os()
+        .filter(|(k, v)| !v.is_empty() && env::is_denied(k))
+        .map(|(k, _)| k.to_string_lossy().into_owned())
         .collect();
+    present.sort();
     checks.push(if present.is_empty() {
         Check::new(Status::Ok, "variables", "no conflicting variables set")
     } else {
@@ -270,16 +257,6 @@ fn environment_checks() -> Vec<Check> {
     checks
 }
 
-fn shell_quote(s: &str) -> String {
-    if s.chars()
-        .all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
-    {
-        s.to_string()
-    } else {
-        format!("'{}'", s.replace('\'', r"'\''"))
-    }
-}
-
 fn sync_check(plan: &sync::SyncPlan, loaded: &LoadedConfig, home: &ZemHome) -> Check {
     let result = plan.project.read_state().and_then(|state| match state {
         Some(state) => session::check(&state, loaded, home).map(|()| Some(state)),
@@ -300,7 +277,7 @@ fn sync_check(plan: &sync::SyncPlan, loaded: &LoadedConfig, home: &ZemHome) -> C
             .hint(Some("run `zem sync`"))
             .fix(format!(
                 "zem --project-dir {} sync",
-                shell_quote(&plan.project.root().display().to_string())
+                posix_quote_if_needed(&plan.project.root().display().to_string())
             )),
     }
 }

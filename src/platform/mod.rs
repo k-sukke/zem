@@ -201,10 +201,6 @@ pub fn run_replacing(cmd: Command) -> ZemError {
     }
 }
 
-pub fn serial_port_hint() -> &'static str {
-    imp::serial_port_hint()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SerialAccess {
     Ok,

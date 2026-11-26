@@ -1,19 +1,12 @@
 use std::path::Path;
 
 use super::ProjectDir;
+use crate::env::shell::{fish_quote, posix_quote};
 use crate::error::Result;
 use crate::fsutil;
 
 pub const ACTIVATE_SH: &str = "activate.sh";
 pub const ACTIVATE_FISH: &str = "activate.fish";
-
-fn sh_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', r"'\''"))
-}
-
-fn fish_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\\', r"\\").replace('\'', r"\'"))
-}
 
 /// The scripts delegate to `zem env` so they always reflect the current shell's environment;
 /// `fallback_exe` is used when `zem` is not on PATH.
@@ -23,8 +16,8 @@ pub fn render_sh(root: &Path, fallback_exe: &Path) -> String {
          if command -v zem >/dev/null 2>&1; then _zem=zem; else _zem={exe}; fi\n\
          eval \"$(\"$_zem\" --project-dir {root} env --shell posix)\"\n\
          unset _zem\n",
-        exe = sh_quote(&fallback_exe.to_string_lossy()),
-        root = sh_quote(&root.to_string_lossy()),
+        exe = posix_quote(&fallback_exe.to_string_lossy()),
+        root = posix_quote(&root.to_string_lossy()),
     )
 }
 
@@ -45,9 +38,9 @@ fn reapply_sh(root: &Path, exe: &Path, prompt: &str) -> String {
     format!(
         "eval \"$({exe} --project-dir {root} env --shell posix)\"\n\
          PS1={prompt}\"$PS1\"\n",
-        exe = sh_quote(&exe.to_string_lossy()),
-        root = sh_quote(&root.to_string_lossy()),
-        prompt = sh_quote(prompt),
+        exe = posix_quote(&exe.to_string_lossy()),
+        root = posix_quote(&root.to_string_lossy()),
+        prompt = posix_quote(prompt),
     )
 }
 
@@ -60,7 +53,7 @@ pub fn render_zshenv(own_dir: &Path) -> String {
          [ -r \"$ZDOTDIR/.zshenv\" ] && . \"$ZDOTDIR/.zshenv\"\n\
          ZEM_USER_ZDOTDIR=\"$ZDOTDIR\"\n\
          ZDOTDIR={own}\n",
-        own = sh_quote(&own_dir.to_string_lossy()),
+        own = posix_quote(&own_dir.to_string_lossy()),
     )
 }
 

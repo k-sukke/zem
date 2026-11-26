@@ -68,14 +68,6 @@ pub fn to_cmake_path(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-pub fn serial_port_hint() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "/dev/cu.usbserial-XXXX"
-    } else {
-        "/dev/ttyUSB0"
-    }
-}
-
 pub fn serial_access() -> SerialAccess {
     if !cfg!(target_os = "linux") {
         return SerialAccess::NotApplicable;
