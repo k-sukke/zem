@@ -2,8 +2,6 @@ use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::platform;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
     pub major: u32,
@@ -78,15 +76,6 @@ pub const WEST: ToolSpec = ToolSpec {
     version_args: &["--version"],
 };
 
-pub fn python() -> ToolSpec {
-    ToolSpec {
-        name: "python",
-        candidates: platform::python_candidates(),
-        version_args: &["--version"],
-    }
-}
-
-pub const MIN_PYTHON: Version = Version::new(3, 10, 0);
 pub const MIN_CMAKE: Version = Version::new(3, 20, 5);
 
 #[derive(Debug, Clone)]
@@ -141,6 +130,6 @@ mod tests {
     #[test]
     fn version_ordering() {
         assert!(Version::new(3, 20, 5) > Version::new(3, 20, 0));
-        assert!(Version::new(3, 9, 0) < MIN_PYTHON);
+        assert!(Version::new(3, 19, 9) < MIN_CMAKE);
     }
 }

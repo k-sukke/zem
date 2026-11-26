@@ -75,10 +75,6 @@ impl ZemHome {
         self.cache_dir().join("uv")
     }
 
-    pub fn pip_cache_dir(&self) -> PathBuf {
-        self.cache_dir().join("pip")
-    }
-
     pub fn ccache_dir(&self) -> PathBuf {
         self.cache_dir().join("ccache")
     }

@@ -49,7 +49,7 @@ zem tries to solve these with the following principles:
 
 - macOS or Linux
 - git
-- [uv](https://docs.astral.sh/uv/) (recommended; zem then provisions Python itself through uv) or Python 3.10+
+- [uv](https://docs.astral.sh/uv/) (zem provisions Python itself through uv)
 - Rust 1.89+ to build zem
 
 cmake and ninja are installed into the venv via pip by default, so they are not required on the host. `dtc` is recommended.
@@ -231,7 +231,7 @@ The project's `.zem/` holds only lightweight files and is git-ignored.
 ├── venvs/        # Python environments
 ├── sdk/          # Zephyr SDK (only the toolchains you need)
 ├── python/       # Python interpreters managed by uv
-└── cache/        # uv / pip / ccache caches
+└── cache/        # uv / ccache caches
 ```
 
 ```sh

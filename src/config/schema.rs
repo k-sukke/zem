@@ -162,7 +162,6 @@ impl From<SdkVersion> for String {
 #[serde(deny_unknown_fields, default)]
 pub struct Python {
     pub version: String,
-    pub installer: PyInstaller,
     pub host_tools_via_pip: bool,
     pub extra_requirements: Vec<String>,
 }
@@ -171,20 +170,10 @@ impl Default for Python {
     fn default() -> Self {
         Python {
             version: DEFAULT_PYTHON_VERSION.to_string(),
-            installer: PyInstaller::default(),
             host_tools_via_pip: true,
             extra_requirements: Vec::new(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PyInstaller {
-    #[default]
-    Auto,
-    Uv,
-    Venv,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

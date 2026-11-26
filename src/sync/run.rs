@@ -198,22 +198,18 @@ fn run_steps(
     let env = sync_env(home, &plan, cfg);
 
     steps.begin("Python environment");
-    let installer = venv::resolve_installer(&cfg.python, &env)?;
+    let uv = venv::resolve_uv(&env)?;
     let venv = VenvStore {
         dir: &plan.venv_dir,
         cfg: &cfg.python,
         env: &env,
         runner: &runner,
     };
-    let created = venv.ensure_bootstrap(&installer, constraints.as_deref())?;
+    let created = venv.ensure_bootstrap(&uv, constraints.as_deref())?;
     steps.done(outcome(
         created,
         &format!("reused {venv_key}"),
-        &format!(
-            "created {venv_key} with {} (Python {})",
-            installer.name(),
-            cfg.python.version
-        ),
+        &format!("created {venv_key} with uv (Python {})", cfg.python.version),
     ));
 
     steps.begin(&format!("Zephyr workspace {}", cfg.zephyr.version));
@@ -267,8 +263,7 @@ fn run_steps(
 
     steps.begin("Python requirements");
     let locked_packages = pins.packages.as_deref().zip(constraints.as_deref());
-    let (created, packages) =
-        venv.ensure_requirements(&installer, &ws.zephyr_base, locked_packages)?;
+    let (created, packages) = venv.ensure_requirements(&uv, &ws.zephyr_base, locked_packages)?;
     if let Some(locked) = &pins.packages
         && *locked != packages
     {

@@ -222,12 +222,20 @@ fn sync_reports_config_errors_with_location() {
 
 #[cfg(unix)]
 #[test]
-fn sync_without_python_installer_fails_before_downloading() {
+fn sync_without_uv_fails_before_downloading() {
     let sb = Sandbox::new();
     sb.init("esp32c3_devkitm");
-    let empty_path = tempfile::tempdir().unwrap();
+    let path_without_uv = tempfile::tempdir().unwrap();
+    // Even if a host python3 exists on PATH, zem requires uv and does not fall back to venv.
+    let fake_python = path_without_uv.path().join("python3");
+    fs::write(&fake_python, "#!/bin/sh\necho Python 3.12.0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&fake_python, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     sb.zem()
-        .env("PATH", empty_path.path())
+        .env("PATH", path_without_uv.path())
         .arg("sync")
         .assert()
         .failure()

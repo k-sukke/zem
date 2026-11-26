@@ -96,10 +96,6 @@ pub fn venv_python(venv: &Path) -> PathBuf {
     venv_bin_dir(venv).join(exe_name("python"))
 }
 
-pub fn python_candidates() -> &'static [&'static str] {
-    imp::PYTHON_CANDIDATES
-}
-
 /// Environment variable names are case-insensitive on Windows (`Path` == `PATH`).
 pub fn env_key_eq(a: &OsStr, b: &OsStr) -> bool {
     imp::env_key_eq(a, b)

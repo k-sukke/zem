@@ -4,7 +4,7 @@ use super::{Check, Report, Status};
 use crate::config::{self, LoadedConfig};
 use crate::home::ZemHome;
 use crate::platform::{self, Os, SerialAccess};
-use crate::tools::{self, MIN_CMAKE, MIN_PYTHON, Probe, ToolSpec};
+use crate::tools::{self, MIN_CMAKE, Probe, ToolSpec};
 use crate::{serial, session, sync};
 
 const CONFLICTING_VARS: &[&str] = &[
@@ -102,49 +102,18 @@ fn required_tool_checks() -> Vec<Check> {
         None => missing(Status::Fail, &tools::GIT, "not found (required by west)"),
     });
 
-    let uv = tools::probe(&tools::UV);
-    let python_spec = tools::python();
-    let python = tools::probe(&python_spec);
-    match &uv {
-        Some(p) => checks.push(Check::new(
+    checks.push(match tools::probe(&tools::UV) {
+        Some(p) => Check::new(
             Status::Ok,
             "uv",
-            format!("{} — manages Python for zem", describe(p)),
-        )),
-        None => checks.push(
-            Check::new(
-                Status::Info,
-                "uv",
-                "not found; falling back to the system Python (slower)",
-            )
-            .install(platform::install_hint("uv")),
+            format!("{} — manages Python for zem", describe(&p)),
         ),
-    }
-    let python_check = match (&python, &uv) {
-        (Some(p), _) if p.version.is_some_and(|v| v >= MIN_PYTHON) => {
-            Check::new(Status::Ok, "python", describe(p))
-        }
-        (Some(p), Some(_)) => Check::new(
-            Status::Info,
-            "python",
-            format!(
-                "{} is older than {MIN_PYTHON}; uv will provide a newer one",
-                describe(p)
-            ),
-        ),
-        (Some(p), None) => missing(
+        None => missing(
             Status::Fail,
-            &python_spec,
-            &format!("{} is older than {MIN_PYTHON}", describe(p)),
+            &tools::UV,
+            "not found (required to manage Python environments)",
         ),
-        (None, Some(_)) => Check::new(Status::Info, "python", "not found; uv will provide one"),
-        (None, None) => missing(
-            Status::Fail,
-            &python_spec,
-            "not found (install uv or Python 3.10+)",
-        ),
-    };
-    checks.push(python_check);
+    });
     checks
 }
 

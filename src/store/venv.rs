@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{MARKER_SCHEMA, read_marker, write_marker};
-use crate::config::{PyInstaller, Python};
+use crate::config::Python;
 use crate::env::EnvBuilder;
 use crate::error::{Result, ZemError};
 use crate::fsutil;
@@ -11,7 +11,6 @@ use crate::home::keys::sha256_hex;
 use crate::lockfile;
 use crate::platform;
 use crate::process::Runner;
-use crate::tools::{self, Version};
 
 /// Zephyr's base requirements, relative to the zephyr checkout.
 pub const REQUIREMENTS_BASE: &str = "scripts/requirements-base.txt";
@@ -29,26 +28,11 @@ pub struct VenvMarker {
     pub packages: Option<Vec<String>>,
 }
 
-/// The frozen packages of an existing venv, if it was fully installed.
+/// The frozen packages of an existing venv, if it was fully installed by uv.
 pub fn installed_packages(dir: &Path) -> Option<Vec<String>> {
     read_marker::<VenvMarker>(dir)
-        .filter(|m| m.schema == MARKER_SCHEMA)
+        .filter(|m| m.schema == MARKER_SCHEMA && m.installer == "uv")
         .and_then(|m| m.packages)
-}
-
-#[derive(Debug, Clone)]
-pub enum Installer {
-    Uv(PathBuf),
-    Venv(PathBuf),
-}
-
-impl Installer {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Installer::Uv(_) => "uv",
-            Installer::Venv(_) => "venv",
-        }
-    }
 }
 
 fn find_in(env: &EnvBuilder, name: &str) -> Option<PathBuf> {
@@ -57,45 +41,15 @@ fn find_in(env: &EnvBuilder, name: &str) -> Option<PathBuf> {
     which::which_in(name, Some(path), cwd).ok()
 }
 
-pub fn resolve_installer(cfg: &Python, env: &EnvBuilder) -> Result<Installer> {
-    let uv = || find_in(env, "uv").map(Installer::Uv);
-    let venv = || find_python(env, &cfg.version).map(Installer::Venv);
-    let found = match cfg.installer {
-        PyInstaller::Uv => uv(),
-        PyInstaller::Venv => venv(),
-        PyInstaller::Auto => uv().or_else(venv),
-    };
-    found.ok_or_else(|| ZemError::ToolNotFound {
-        tool: match cfg.installer {
-            PyInstaller::Venv => "python",
-            _ => "uv",
-        },
-        advice: Some(match cfg.installer {
-            PyInstaller::Venv => format!(
-                "install Python {} or set [python].installer = \"uv\"",
-                cfg.version
-            ),
-            _ => platform::install_hint("uv")
+pub fn resolve_uv(env: &EnvBuilder) -> Result<PathBuf> {
+    find_in(env, "uv").ok_or_else(|| ZemError::ToolNotFound {
+        tool: "uv",
+        advice: Some(
+            platform::install_hint("uv")
                 .map(|h| h.to_string())
                 .unwrap_or_else(|| "install uv: https://docs.astral.sh/uv/".to_string()),
-        }),
+        ),
     })
-}
-
-/// A host interpreter for the `venv` fallback, preferring an exact `pythonX.Y` match.
-fn find_python(env: &EnvBuilder, wanted: &str) -> Option<PathBuf> {
-    let exact = format!("python{wanted}");
-    std::iter::once(exact.as_str())
-        .chain(platform::python_candidates().iter().copied())
-        .filter_map(|name| find_in(env, name))
-        .find(|path| {
-            std::process::Command::new(path)
-                .arg("--version")
-                .output()
-                .ok()
-                .and_then(|o| Version::parse_first(&String::from_utf8_lossy(&o.stdout)))
-                .is_some_and(|v| v >= tools::MIN_PYTHON)
-        })
 }
 
 pub fn bootstrap_packages(cfg: &Python) -> Vec<String> {
@@ -129,15 +83,11 @@ impl VenvStore<'_> {
 
     fn marker(&self) -> Option<VenvMarker> {
         read_marker::<VenvMarker>(self.dir)
-            .filter(|m| m.schema == MARKER_SCHEMA && self.python().is_file())
+            .filter(|m| m.schema == MARKER_SCHEMA && m.installer == "uv" && self.python().is_file())
     }
 
     /// Create the venv with just enough to run `west` (before a workspace exists).
-    pub fn ensure_bootstrap(
-        &self,
-        installer: &Installer,
-        constraints: Option<&Path>,
-    ) -> Result<Outcome> {
+    pub fn ensure_bootstrap(&self, uv: &Path, constraints: Option<&Path>) -> Result<Outcome> {
         let packages = bootstrap_packages(self.cfg);
         if self
             .marker()
@@ -151,28 +101,19 @@ impl VenvStore<'_> {
         if let Some(parent) = self.dir.parent() {
             fsutil::create_dir_all(parent)?;
         }
-        match installer {
-            Installer::Uv(uv) => {
-                let mut cmd = self.env.command(uv);
-                cmd.arg("venv")
-                    .arg(self.dir)
-                    .args(["--python", &self.cfg.version])
-                    .args(["--python-preference", "only-managed", "--no-project"]);
-                self.runner.run(&mut cmd)?;
-            }
-            Installer::Venv(python) => {
-                let mut cmd = self.env.command(python);
-                cmd.args(["-m", "venv"]).arg(self.dir);
-                self.runner.run(&mut cmd)?;
-            }
-        }
-        self.pip_install(installer, &packages, None, constraints)?;
+        let mut cmd = self.env.command(uv);
+        cmd.arg("venv")
+            .arg(self.dir)
+            .args(["--python", &self.cfg.version])
+            .args(["--python-preference", "only-managed", "--no-project"]);
+        self.runner.run(&mut cmd)?;
+        self.pip_install(uv, &packages, None, constraints)?;
 
         write_marker(
             self.dir,
             &VenvMarker {
                 schema: MARKER_SCHEMA,
-                installer: installer.name().to_string(),
+                installer: "uv".to_string(),
                 python: self.cfg.version.clone(),
                 bootstrap: packages,
                 requirements_sha256: None,
@@ -186,7 +127,7 @@ impl VenvStore<'_> {
     /// `pins` when given, and return the resulting frozen package list.
     pub fn ensure_requirements(
         &self,
-        installer: &Installer,
+        uv: &Path,
         zephyr_base: &Path,
         pins: Option<(&[String], &Path)>,
     ) -> Result<(Outcome, Vec<String>)> {
@@ -205,55 +146,35 @@ impl VenvStore<'_> {
         }
 
         self.pip_install(
-            installer,
+            uv,
             &self.cfg.extra_requirements,
             Some(&req),
             pins.map(|(_, constraints)| constraints),
         )?;
-        let packages = self.freeze(installer)?;
+        let packages = self.freeze(uv)?;
         marker.requirements_sha256 = Some(digest);
         marker.packages = Some(packages.clone());
         write_marker(self.dir, &marker)?;
         Ok((Outcome::Created, packages))
     }
 
-    fn freeze(&self, installer: &Installer) -> Result<Vec<String>> {
+    fn freeze(&self, uv: &Path) -> Result<Vec<String>> {
         let python = self.python();
-        let mut cmd = match installer {
-            Installer::Uv(uv) => {
-                let mut cmd = self.env.command(uv);
-                cmd.args(["pip", "freeze", "--python"]).arg(&python);
-                cmd
-            }
-            Installer::Venv(_) => {
-                let mut cmd = self.env.command(&python);
-                cmd.args(["-m", "pip", "freeze", "--disable-pip-version-check"]);
-                cmd
-            }
-        };
+        let mut cmd = self.env.command(uv);
+        cmd.args(["pip", "freeze", "--python"]).arg(&python);
         Ok(lockfile::parse_freeze(&self.runner.output(&mut cmd)?))
     }
 
     fn pip_install(
         &self,
-        installer: &Installer,
+        uv: &Path,
         packages: &[String],
         requirements: Option<&Path>,
         constraints: Option<&Path>,
     ) -> Result<()> {
         let python = self.python();
-        let mut cmd = match installer {
-            Installer::Uv(uv) => {
-                let mut cmd = self.env.command(uv);
-                cmd.args(["pip", "install", "--python"]).arg(&python);
-                cmd
-            }
-            Installer::Venv(_) => {
-                let mut cmd = self.env.command(&python);
-                cmd.args(["-m", "pip", "install", "--disable-pip-version-check"]);
-                cmd
-            }
-        };
+        let mut cmd = self.env.command(uv);
+        cmd.args(["pip", "install", "--python"]).arg(&python);
         if let Some(req) = requirements {
             cmd.arg("-r").arg(req);
         }
@@ -300,13 +221,42 @@ mod tests {
     #[test]
     fn missing_uv_is_reported() {
         let env = EnvBuilder::from_vars([("PATH", "")]);
-        let cfg = Python {
-            installer: PyInstaller::Uv,
-            ..Python::default()
-        };
         assert!(matches!(
-            resolve_installer(&cfg, &env),
+            resolve_uv(&env),
             Err(ZemError::ToolNotFound { tool: "uv", .. })
         ));
+    }
+
+    #[test]
+    fn non_uv_marker_is_ignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let packages = vec!["west==1.4.0".to_string()];
+        write_marker(
+            tmp.path(),
+            &VenvMarker {
+                schema: MARKER_SCHEMA,
+                installer: "venv".to_string(),
+                python: "3.12".to_string(),
+                bootstrap: vec!["west".to_string()],
+                requirements_sha256: Some("abc".to_string()),
+                packages: Some(packages.clone()),
+            },
+        )
+        .unwrap();
+        assert_eq!(installed_packages(tmp.path()), None);
+
+        write_marker(
+            tmp.path(),
+            &VenvMarker {
+                schema: MARKER_SCHEMA,
+                installer: "uv".to_string(),
+                python: "3.12".to_string(),
+                bootstrap: vec!["west".to_string()],
+                requirements_sha256: Some("abc".to_string()),
+                packages: Some(packages.clone()),
+            },
+        )
+        .unwrap();
+        assert_eq!(installed_packages(tmp.path()), Some(packages));
     }
 }

@@ -8,7 +8,6 @@ use super::{InstallHint, Os, SerialAccess};
 pub const EXE_SUFFIX: &str = ".exe";
 pub const SDK_ARCHIVE_EXT: &str = ".7z";
 pub const VENV_BIN_DIR: &str = "Scripts";
-pub const PYTHON_CANDIDATES: &[&str] = &["python", "py"];
 
 pub const STRICT_ENV_ALLOWLIST: &[&str] = &[
     "SYSTEMROOT",
@@ -82,10 +81,6 @@ pub fn install_hint(_os: Os, tool: &str) -> Option<InstallHint> {
     match tool {
         "git" => hint("winget install --id Git.Git", None),
         "uv" => hint("winget install --id astral-sh.uv", None),
-        "python" => hint(
-            "winget install --id astral-sh.uv",
-            Some("install Python 3.10+ yourself"),
-        ),
         "cmake" => hint("winget install --id Kitware.CMake", None),
         "ninja" => hint("winget install --id Ninja-build.Ninja", None),
         "dtc" => hint("choco install dtc-msys2", None),
