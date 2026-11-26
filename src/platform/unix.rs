@@ -115,6 +115,11 @@ pub fn install_hint(os: Os, tool: &str) -> Option<InstallHint> {
 }
 
 #[cfg(test)]
+pub fn set_dir_modified(path: &Path, time: std::time::SystemTime) -> io::Result<()> {
+    std::fs::File::open(path)?.set_modified(time)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

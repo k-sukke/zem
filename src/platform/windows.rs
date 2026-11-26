@@ -96,6 +96,21 @@ pub fn install_hint(_os: Os, tool: &str) -> Option<InstallHint> {
 }
 
 #[cfg(test)]
+pub fn set_dir_modified(path: &Path, time: std::time::SystemTime) -> io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+    // Directories can only be opened with backup semantics, and changing their timestamps
+    // needs FILE_WRITE_ATTRIBUTES rather than plain read access.
+    const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    OpenOptions::new()
+        .access_mode(FILE_WRITE_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?
+        .set_modified(time)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

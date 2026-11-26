@@ -186,6 +186,13 @@ pub fn http_agent() -> ureq::Agent {
         .into()
 }
 
+/// Set a directory's modification time. Windows cannot do this through a file opened for
+/// reading: the directory must be opened with backup semantics and write-attributes access.
+#[cfg(test)]
+pub(crate) fn set_dir_modified(path: &Path, time: std::time::SystemTime) -> io::Result<()> {
+    imp::set_dir_modified(path, time)
+}
+
 /// Hand the terminal over to `cmd`: `exec` on Unix, so signals and the exit code pass through
 /// unchanged; spawn, wait and exit with the child's code on Windows. Returns only on failure.
 pub fn run_replacing(cmd: Command) -> ZemError {
