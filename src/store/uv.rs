@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::{EXTRACT_PREFIX, MARKER_SCHEMA, download, read_marker, write_marker};
+use super::{MARKER_SCHEMA, StagedDir, download, read_marker, write_marker};
 use crate::error::{Result, ZemError};
 use crate::fsutil;
 use crate::home::ZemHome;
@@ -164,10 +164,7 @@ impl UvStore<'_> {
         download::fetch_verified(&self.release.url(), &archive, &self.release.sha256, &asset)?;
 
         // Unpack next to the destination so the final rename is atomic.
-        let staged = tempfile::Builder::new()
-            .prefix(EXTRACT_PREFIX)
-            .tempdir_in(&tools)
-            .map_err(ZemError::io(&tools))?;
+        let staged = StagedDir::new_in(&tools)?;
         platform::extract_uv_archive(&archive, staged.path()).map_err(ZemError::io(&archive))?;
         let top = staged.path().join(format!("uv-{}", self.release.target));
         if !top.join(platform::exe_name("uv")).is_file() {

@@ -101,14 +101,15 @@ impl SyncPlan {
         self.unresolved_branch = false;
     }
 
-    /// Pick the shared venv, or a sibling dedicated to `packages` when the shared one was
-    /// installed with different versions, so locked projects never reinstall packages under
-    /// another project sharing the same venv key.
+    /// Pick the shared venv, or a sibling dedicated to `packages` when the shared one already
+    /// exists without matching recorded packages, so locked projects never reinstall packages
+    /// under another project sharing the same venv key.
     pub fn select_venv(&mut self, home: &ZemHome, packages: Option<&[String]>) {
         self.venv_name = self.venv_key.dir_name();
         self.venv_dir = home.venv_dir(&self.venv_key);
         if let Some(packages) = packages
-            && venv::installed_packages(&self.venv_dir).is_some_and(|p| p != packages)
+            && self.venv_dir.exists()
+            && venv::installed_packages(&self.venv_dir).as_deref() != Some(packages)
         {
             let digest = lockfile::packages_digest(packages);
             self.venv_name = format!("{}-{}", self.venv_name, &digest[..8]);
@@ -170,4 +171,69 @@ impl SyncPlan {
 
 pub fn short(sha: &str) -> &str {
     &sha[..sha.len().min(12)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config;
+    use crate::store::venv::VenvMarker;
+    use crate::store::{MARKER_SCHEMA, write_marker};
+
+    #[test]
+    fn select_venv_uses_dedicated_when_shared_marker_omits_packages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = ZemHome::new(tmp.path().join("home"));
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(
+            proj.join(config::CONFIG_FILE_NAME),
+            "schema = 1\n[project]\nname = \"p\"\n[zephyr]\nversion = \"v4.2.0\"\n\
+             [target]\nboard = \"esp32c3_devkitm\"\n",
+        )
+        .unwrap();
+        let loaded = config::load(&proj).unwrap();
+        let mut plan = plan(&loaded, &home).unwrap();
+        let shared_name = plan.venv_key.dir_name();
+        let shared_dir = home.venv_dir(&plan.venv_key);
+        let locked = vec!["west==1.4.0".to_string()];
+
+        // Absent shared venv can be claimed by a locked project.
+        plan.select_venv(&home, Some(&locked));
+        assert_eq!(plan.venv_name, shared_name);
+
+        // Existing shared venv whose marker omits `packages` must not be replaced by a locked project.
+        std::fs::create_dir_all(&shared_dir).unwrap();
+        write_marker(
+            &shared_dir,
+            &VenvMarker {
+                schema: MARKER_SCHEMA,
+                installer: "uv".to_string(),
+                python: "3.12".to_string(),
+                bootstrap: vec!["west".to_string()],
+                requirements_sha256: Some("abc".to_string()),
+                packages: None,
+            },
+        )
+        .unwrap();
+        plan.select_venv(&home, Some(&locked));
+        assert_ne!(plan.venv_name, shared_name);
+        assert!(plan.venv_name.starts_with(&format!("{shared_name}-")));
+
+        // Matching recorded packages allow reusing the shared venv.
+        write_marker(
+            &shared_dir,
+            &VenvMarker {
+                schema: MARKER_SCHEMA,
+                installer: "uv".to_string(),
+                python: "3.12".to_string(),
+                bootstrap: vec!["west".to_string()],
+                requirements_sha256: Some("abc".to_string()),
+                packages: Some(locked.clone()),
+            },
+        )
+        .unwrap();
+        plan.select_venv(&home, Some(&locked));
+        assert_eq!(plan.venv_name, shared_name);
+    }
 }

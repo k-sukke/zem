@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{EXTRACT_PREFIX, download};
+use super::{StagedDir, download};
 use crate::config::SdkVersion;
 use crate::error::{Result, ZemError};
 use crate::fsutil;
@@ -190,11 +190,8 @@ impl SdkStore<'_> {
 
 /// Extract into a temp dir next to the destination (same filesystem, so the final rename is
 /// atomic) and check that the archive contains `top/`.
-fn extract_staged(archive: &Path, parent: &Path, top: &str) -> Result<tempfile::TempDir> {
-    let staged = tempfile::Builder::new()
-        .prefix(EXTRACT_PREFIX)
-        .tempdir_in(parent)
-        .map_err(ZemError::io(parent))?;
+fn extract_staged(archive: &Path, parent: &Path, top: &str) -> Result<StagedDir> {
+    let staged = StagedDir::new_in(parent)?;
     platform::extract_sdk_archive(archive, staged.path()).map_err(ZemError::io(archive))?;
     if !staged.path().join(top).is_dir() {
         return Err(ZemError::CorruptState {

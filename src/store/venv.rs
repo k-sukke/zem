@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{EXTRACT_PREFIX, MARKER_SCHEMA, read_marker, write_marker};
+use super::{MARKER_SCHEMA, StagedDir, read_marker, write_marker};
 use crate::config::Python;
 use crate::env::EnvBuilder;
 use crate::error::{Result, ZemError};
@@ -48,25 +48,47 @@ pub fn bootstrap_packages(cfg: &Python) -> Vec<String> {
     pkgs
 }
 
+struct StagedRebuild {
+    dir: StagedDir,
+    venv: PathBuf,
+    bootstrap: Vec<String>,
+}
+
 pub struct VenvStore<'a> {
     pub dir: &'a Path,
     pub cfg: &'a Python,
     pub env: &'a EnvBuilder,
     pub runner: &'a Runner,
+    staged: Option<StagedRebuild>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Reused,
     Created,
 }
 
-impl VenvStore<'_> {
+impl<'a> VenvStore<'a> {
+    pub fn new(dir: &'a Path, cfg: &'a Python, env: &'a EnvBuilder, runner: &'a Runner) -> Self {
+        Self {
+            dir,
+            cfg,
+            env,
+            runner,
+            staged: None,
+        }
+    }
+
     pub fn python(&self) -> PathBuf {
         platform::venv_python(self.dir)
     }
 
     pub fn west(&self) -> PathBuf {
-        platform::venv_bin_dir(self.dir).join(platform::exe_name("west"))
+        let dir = self
+            .staged
+            .as_ref()
+            .map_or(self.dir, |staged| staged.venv.as_path());
+        platform::venv_bin_dir(dir).join(platform::exe_name("west"))
     }
 
     fn marker(&self) -> Option<VenvMarker> {
@@ -75,7 +97,16 @@ impl VenvStore<'_> {
     }
 
     /// Create the venv with just enough to run `west` (before a workspace exists).
-    pub fn ensure_bootstrap(&self, uv: &Path, pins: Option<(&[String], &Path)>) -> Result<Outcome> {
+    ///
+    /// When rebuilding over an existing venv, the staged venv is kept aside until
+    /// [`ensure_requirements`](Self::ensure_requirements) finishes so `self.dir` is never left
+    /// with only bootstrap packages if a later step fails.
+    pub fn ensure_bootstrap(
+        &mut self,
+        uv: &Path,
+        pins: Option<(&[String], &Path)>,
+    ) -> Result<Outcome> {
+        self.staged = None;
         let packages = bootstrap_packages(self.cfg);
         if self.marker().is_some_and(|m| {
             m.bootstrap == packages
@@ -87,23 +118,12 @@ impl VenvStore<'_> {
             return Ok(Outcome::Reused);
         }
 
-        let previous_packages = installed_packages(self.dir).or_else(|| {
-            self.python()
-                .is_file()
-                .then(|| self.freeze_at(self.dir, uv).ok())
-                .flatten()
-                .filter(|pkgs| !pkgs.is_empty())
-        });
-
         let parent = self.dir.parent().ok_or_else(|| ZemError::CorruptState {
             path: self.dir.to_path_buf(),
             message: "venv path has no parent directory".to_string(),
         })?;
         fsutil::create_dir_all(parent)?;
-        let staged = tempfile::Builder::new()
-            .prefix(EXTRACT_PREFIX)
-            .tempdir_in(parent)
-            .map_err(ZemError::io(parent))?;
+        let staged = StagedDir::new_in(parent)?;
         let staged_venv = staged.path().join("venv");
 
         let mut cmd = self.command_at(&staged_venv, uv);
@@ -134,12 +154,18 @@ impl VenvStore<'_> {
             });
         }
 
+        if self.dir.exists() {
+            self.staged = Some(StagedRebuild {
+                dir: staged,
+                venv: staged_venv,
+                bootstrap: packages,
+            });
+            return Ok(Outcome::Created);
+        }
+
         let recorded_packages = match pins.filter(|(locked, _)| !locked.is_empty()) {
             Some((locked, _)) => locked.to_vec(),
-            None => match previous_packages {
-                Some(prev) => prev,
-                None => self.freeze_at(&staged_venv, uv)?,
-            },
+            None => self.freeze_at(&staged_venv, uv)?,
         };
         write_marker(
             &staged_venv,
@@ -152,14 +178,14 @@ impl VenvStore<'_> {
                 packages: Some(recorded_packages),
             },
         )?;
-        replace_dir(&staged_venv, self.dir, &staged.path().join("previous"))?;
+        replace_staged_dir(staged, &staged_venv, self.dir)?;
         Ok(Outcome::Created)
     }
 
     /// Install Zephyr's base requirements plus `[python].extra_requirements`, constrained to
     /// `pins` when given, and return the resulting frozen package list.
     pub fn ensure_requirements(
-        &self,
+        &mut self,
         uv: &Path,
         zephyr_base: &Path,
         pins: Option<(&[String], &Path)>,
@@ -167,6 +193,31 @@ impl VenvStore<'_> {
         let req = zephyr_base.join(REQUIREMENTS_BASE);
         let text = fs::read_to_string(&req).map_err(ZemError::io(&req))?;
         let digest = requirements_digest(&text, &self.cfg.extra_requirements);
+
+        if let Some(rebuild) = self.staged.take() {
+            self.pip_install_at(
+                &rebuild.venv,
+                uv,
+                &self.cfg.extra_requirements,
+                Some(&req),
+                pins.map(|(_, constraints)| constraints),
+            )?;
+            let packages = self.freeze_at(&rebuild.venv, uv)?;
+            write_marker(
+                &rebuild.venv,
+                &VenvMarker {
+                    schema: MARKER_SCHEMA,
+                    installer: "uv".to_string(),
+                    python: self.cfg.version.clone(),
+                    bootstrap: rebuild.bootstrap,
+                    requirements_sha256: Some(digest),
+                    packages: Some(packages.clone()),
+                },
+            )?;
+            replace_staged_dir(rebuild.dir, &rebuild.venv, self.dir)?;
+            return Ok((Outcome::Created, packages));
+        }
+
         let mut marker = self.marker().ok_or_else(|| ZemError::CorruptState {
             path: super::marker_path(self.dir),
             message: "venv marker disappeared during sync".to_string(),
@@ -246,20 +297,39 @@ impl VenvStore<'_> {
     }
 }
 
-/// Swap `staged` into `dest`, parking any existing `dest` at `backup` (on the same filesystem)
-/// and restoring it if the final rename fails.
-fn replace_dir(staged: &Path, dest: &Path, backup: &Path) -> Result<()> {
+/// Swap `staged_venv` (inside `staged`) into `dest`, parking any existing `dest` at
+/// `staged.path().join("previous")` (on the same filesystem) and restoring it if the final
+/// rename fails. If restoration also fails, `staged` is kept on disk so the backup is not
+/// deleted and both errors plus the backup path are reported.
+fn replace_staged_dir(staged: StagedDir, staged_venv: &Path, dest: &Path) -> Result<()> {
+    replace_staged_dir_with(staged, staged_venv, dest, |from, to| fs::rename(from, to))
+}
+
+fn replace_staged_dir_with(
+    staged: StagedDir,
+    staged_venv: &Path,
+    dest: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<()> {
+    let backup = staged.path().join("previous");
     let had_existing = match fs::symlink_metadata(dest) {
         Ok(_) => {
-            fs::rename(dest, backup).map_err(ZemError::io(dest))?;
+            rename(dest, &backup).map_err(ZemError::io(dest))?;
             true
         }
         Err(e) if e.kind() == ErrorKind::NotFound => false,
         Err(e) => return Err(ZemError::io(dest)(e)),
     };
-    if let Err(err) = fs::rename(staged, dest) {
-        if had_existing {
-            let _ = fs::rename(backup, dest);
+    if let Err(err) = rename(staged_venv, dest) {
+        if had_existing && let Err(restore_err) = rename(&backup, dest) {
+            let _kept = staged.keep();
+            return Err(ZemError::Io {
+                path: dest.to_path_buf(),
+                source: std::io::Error::other(format!(
+                    "failed to publish staged venv ({err}); failed to restore previous venv from {} ({restore_err})",
+                    backup.display()
+                )),
+            });
         }
         return Err(ZemError::io(dest)(err));
     }
@@ -322,26 +392,92 @@ mod tests {
     }
 
     #[test]
-    fn replace_dir_swaps_and_restores_on_missing_staged() {
+    fn replace_staged_dir_swaps_and_restores_on_missing_staged() {
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("venv");
-        let staged = tmp.path().join("staged");
-        let backup = tmp.path().join("previous");
 
-        fs::create_dir_all(&staged).unwrap();
-        fs::write(staged.join("gen"), "v1").unwrap();
-        replace_dir(&staged, &dest, &backup).unwrap();
+        let staged = StagedDir::new_in(tmp.path()).unwrap();
+        let staged_root = staged.path().to_path_buf();
+        let staged_venv = staged_root.join("venv");
+        fs::create_dir_all(&staged_venv).unwrap();
+        fs::write(staged_venv.join("gen"), "v1").unwrap();
+        replace_staged_dir(staged, &staged_venv, &dest).unwrap();
         assert_eq!(fs::read_to_string(dest.join("gen")).unwrap(), "v1");
+        assert!(
+            !staged_root.exists(),
+            "staging dir should be cleaned up on success"
+        );
 
-        // Missing staged directory leaves the existing destination intact.
-        assert!(replace_dir(&tmp.path().join("missing"), &dest, &backup).is_err());
+        // Missing staged directory leaves the existing destination intact and cleans up staging.
+        let staged_missing = StagedDir::new_in(tmp.path()).unwrap();
+        let missing_root = staged_missing.path().to_path_buf();
+        let missing_venv = missing_root.join("missing");
+        assert!(replace_staged_dir(staged_missing, &missing_venv, &dest).is_err());
         assert_eq!(fs::read_to_string(dest.join("gen")).unwrap(), "v1");
+        assert!(
+            !missing_root.exists(),
+            "staging dir should be cleaned up after successful restore"
+        );
 
-        let staged2 = tmp.path().join("staged2");
-        fs::create_dir_all(&staged2).unwrap();
-        fs::write(staged2.join("gen"), "v2").unwrap();
-        let backup2 = tmp.path().join("previous2");
-        replace_dir(&staged2, &dest, &backup2).unwrap();
+        let staged2 = StagedDir::new_in(tmp.path()).unwrap();
+        let staged2_root = staged2.path().to_path_buf();
+        let staged2_venv = staged2_root.join("venv");
+        fs::create_dir_all(&staged2_venv).unwrap();
+        fs::write(staged2_venv.join("gen"), "v2").unwrap();
+        replace_staged_dir(staged2, &staged2_venv, &dest).unwrap();
         assert_eq!(fs::read_to_string(dest.join("gen")).unwrap(), "v2");
+        assert!(!staged2_root.exists());
+    }
+
+    #[test]
+    fn replace_staged_dir_preserves_backup_when_restore_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("venv");
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("gen"), "v1").unwrap();
+
+        let staged = StagedDir::new_in(tmp.path()).unwrap();
+        let staged_root = staged.path().to_path_buf();
+        let staged_venv = staged_root.join("venv");
+        let backup = staged_root.join("previous");
+        fs::create_dir_all(&staged_venv).unwrap();
+        fs::write(staged_venv.join("gen"), "v2").unwrap();
+
+        let mut call = 0usize;
+        let err = replace_staged_dir_with(staged, &staged_venv, &dest, |from, to| {
+            call += 1;
+            match call {
+                1 => fs::rename(from, to),
+                2 => Err(std::io::Error::new(
+                    ErrorKind::PermissionDenied,
+                    "simulated publish failure",
+                )),
+                3 => Err(std::io::Error::new(
+                    ErrorKind::PermissionDenied,
+                    "simulated restore failure",
+                )),
+                _ => unreachable!(),
+            }
+        })
+        .unwrap_err();
+
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains(&backup.display().to_string()),
+            "error should include backup path: {msg}"
+        );
+        assert!(
+            msg.contains("simulated publish failure"),
+            "error should include publish error: {msg}"
+        );
+        assert!(
+            msg.contains("simulated restore failure"),
+            "error should include restore error: {msg}"
+        );
+        assert!(
+            backup.is_dir(),
+            "backup must not be deleted when restore fails"
+        );
+        assert_eq!(fs::read_to_string(backup.join("gen")).unwrap(), "v1");
     }
 }

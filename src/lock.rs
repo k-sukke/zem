@@ -34,6 +34,21 @@ impl FileLock {
         }
     }
 
+    /// Like [`try_exclusive`](Self::try_exclusive), but returns `Ok(Some(None))` when `path`
+    /// does not exist instead of creating it.
+    pub fn try_exclusive_if_exists(path: &Path) -> Result<Option<Option<Self>>> {
+        let file = match OpenOptions::new().read(true).write(true).open(path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Some(None)),
+            Err(e) => return Err(ZemError::io(path)(e)),
+        };
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Some(FileLock { _file: file }))),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(e)) => Err(ZemError::io(path)(e)),
+        }
+    }
+
     pub fn exclusive(path: &Path, what: &str) -> Result<Self> {
         let file = open(path)?;
         match file.try_lock() {

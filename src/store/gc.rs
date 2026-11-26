@@ -8,13 +8,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use super::EXTRACT_PREFIX;
 use super::registry::{self, Registry};
 use super::sdk;
+use super::{EXTRACT_PREFIX, STAGING_LOCK_FILE};
 use crate::config::CONFIG_FILE_NAME;
 use crate::error::{Result, ZemError};
 use crate::fsutil;
 use crate::home::ZemHome;
+use crate::lock::FileLock;
 use crate::project::{PROJECT_STATE_DIR, ProjectState, STATE_FILE};
 
 const SDK_DIR_PREFIX: &str = "zephyr-sdk-";
@@ -43,6 +44,12 @@ impl Kind {
 }
 
 #[derive(Debug, Clone)]
+enum StoreLock {
+    Named(String),
+    Staging(PathBuf),
+}
+
+#[derive(Debug, Clone)]
 pub struct Store {
     pub kind: Kind,
     pub name: String,
@@ -51,7 +58,7 @@ pub struct Store {
     pub size: u64,
     pub users: Vec<PathBuf>,
     /// Store lock guarding writes to this store, if any.
-    lock: Option<String>,
+    lock: Option<StoreLock>,
 }
 
 impl Store {
@@ -157,7 +164,7 @@ fn is_old(path: &Path) -> bool {
         .is_some_and(|age| age >= LEFTOVER_AGE)
 }
 
-fn leftover(name: String, path: PathBuf, lock: Option<String>) -> Store {
+fn leftover(name: String, path: PathBuf, lock: Option<StoreLock>) -> Store {
     Store {
         kind: Kind::Leftover,
         size: fsutil::dir_size(&path),
@@ -166,6 +173,11 @@ fn leftover(name: String, path: PathBuf, lock: Option<String>) -> Store {
         users: Vec::new(),
         lock,
     }
+}
+
+fn staging_leftover(name: String, path: PathBuf) -> Store {
+    let lock = StoreLock::Staging(path.join(STAGING_LOCK_FILE));
+    leftover(name, path, Some(lock))
 }
 
 fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
@@ -182,7 +194,7 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
         for (name, path) in subdirs(&dir) {
             if name.starts_with(EXTRACT_PREFIX) {
                 if is_old(&path) {
-                    stores.push(leftover(format!("{prefix}s/{name}"), path, None));
+                    stores.push(staging_leftover(format!("{prefix}s/{name}"), path));
                 }
                 continue;
             }
@@ -190,7 +202,7 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
                 kind,
                 size: fsutil::dir_size(&path),
                 users: users(map, &name),
-                lock: Some(format!("{prefix}-{name}")),
+                lock: Some(StoreLock::Named(format!("{prefix}-{name}"))),
                 name,
                 path,
             });
@@ -200,19 +212,19 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
     for (name, path) in subdirs(&home.sdk_dir()) {
         if name.starts_with(EXTRACT_PREFIX) {
             if is_old(&path) {
-                stores.push(leftover(format!("sdk/{name}"), path, None));
+                stores.push(staging_leftover(format!("sdk/{name}"), path));
             }
             continue;
         }
         let Some(version) = name.strip_prefix(SDK_DIR_PREFIX) else {
             continue;
         };
-        let lock = Some(format!("sdk-{version}"));
+        let lock = Some(StoreLock::Named(format!("sdk-{version}")));
         let mut toolchain_size = 0;
         for (tc, tc_path) in subdirs(&path) {
             if tc.starts_with(EXTRACT_PREFIX) {
                 if is_old(&tc_path) {
-                    stores.push(leftover(format!("{name}/{tc}"), tc_path, lock.clone()));
+                    stores.push(staging_leftover(format!("{name}/{tc}"), tc_path));
                 }
                 continue;
             }
@@ -250,7 +262,7 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
 
     for (name, path) in subdirs(&home.tools_dir()) {
         if name.starts_with(EXTRACT_PREFIX) && is_old(&path) {
-            stores.push(leftover(format!("tools/{name}"), path, None));
+            stores.push(staging_leftover(format!("tools/{name}"), path));
         }
     }
 
@@ -261,28 +273,36 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
     stores
 }
 
-fn shared(home: &ZemHome) -> Vec<(String, u64)> {
-    let mut dirs = vec![
-        ("python".to_string(), home.python_dir()),
-        ("tools".to_string(), home.tools_dir()),
+fn shared(home: &ZemHome, stores: &[Store]) -> Vec<(String, u64)> {
+    let tools_dir = home.tools_dir();
+    let tools_leftovers: u64 = stores
+        .iter()
+        .filter(|s| s.kind == Kind::Leftover && s.path.parent() == Some(tools_dir.as_path()))
+        .map(|s| s.size)
+        .sum();
+    let mut out = vec![
+        ("python".to_string(), fsutil::dir_size(&home.python_dir())),
+        (
+            "tools".to_string(),
+            fsutil::dir_size(&tools_dir).saturating_sub(tools_leftovers),
+        ),
     ];
-    dirs.extend(
+    out.extend(
         subdirs(&home.cache_dir())
             .into_iter()
-            .map(|(name, path)| (format!("cache/{name}"), path)),
+            .map(|(name, path)| (format!("cache/{name}"), fsutil::dir_size(&path))),
     );
-    dirs.into_iter()
-        .map(|(name, path)| (name, fsutil::dir_size(&path)))
-        .filter(|(_, size)| *size > 0)
-        .collect()
+    out.into_iter().filter(|(_, size)| *size > 0).collect()
 }
 
 pub fn usage(home: &ZemHome) -> Result<Usage> {
     let registry = registry::load(home)?;
     let (refs, projects, stale) = references(home, &registry);
+    let stores = scan(home, &refs);
+    let shared = shared(home, &stores);
     Ok(Usage {
-        stores: scan(home, &refs),
-        shared: shared(home),
+        stores,
+        shared,
         projects,
         stale,
     })
@@ -337,13 +357,22 @@ pub fn collect(home: &ZemHome, dry_run: bool) -> Result<GcReport> {
             continue;
         }
         let guard = match &store.lock {
-            Some(name) => match super::try_lock(home, name)? {
+            Some(StoreLock::Named(name)) => match super::try_lock(home, name)? {
                 Some(guard) => Some(guard),
                 None => {
                     report.busy.push(store);
                     continue;
                 }
             },
+            Some(StoreLock::Staging(lock_path)) => {
+                match FileLock::try_exclusive_if_exists(lock_path)? {
+                    Some(guard) => guard,
+                    None => {
+                        report.busy.push(store);
+                        continue;
+                    }
+                }
+            }
             None => None,
         };
         if !dry_run {
@@ -539,6 +568,11 @@ mod tests {
         assert_eq!(names(&report.removed), ["ws-old", "py-old", "0.16.8"]);
     }
 
+    fn backdate_dir(path: &Path) {
+        let old = SystemTime::now() - LEFTOVER_AGE - Duration::from_secs(60);
+        fs::File::open(path).unwrap().set_modified(old).unwrap();
+    }
+
     #[test]
     fn gc_ignores_active_venv_staging_dirs() {
         let f = fixture();
@@ -548,5 +582,60 @@ mod tests {
         let report = collect(&f.home, false).unwrap();
         assert!(staged.is_dir(), "young staging dir must not be removed");
         assert!(!report.removed.iter().any(|s| s.path == staged));
+    }
+
+    #[test]
+    fn gc_respects_staging_lock_even_when_old() {
+        let f = fixture();
+        project(&f, "a", "riscv64-zephyr-elf");
+        let staged = super::super::StagedDir::new_in(&f.home.venvs_dir()).unwrap();
+        let staged_path = staged.path().to_path_buf();
+        backdate_dir(&staged_path);
+
+        let report = collect(&f.home, false).unwrap();
+        assert!(
+            staged_path.is_dir(),
+            "locked staging dir must not be removed"
+        );
+        assert!(report.busy.iter().any(|s| s.path == staged_path));
+        assert!(!report.removed.iter().any(|s| s.path == staged_path));
+
+        // Once the producer releases the lock (e.g. crashed leaving the dir behind), GC removes it.
+        let kept = staged.keep();
+        let report = collect(&f.home, false).unwrap();
+        assert!(!kept.exists());
+        assert!(report.removed.iter().any(|s| s.path == kept));
+    }
+
+    #[test]
+    fn usage_excludes_tools_leftovers_from_shared_total() {
+        let f = fixture();
+        project(&f, "a", "riscv64-zephyr-elf");
+        let tools = f.home.tools_dir();
+        let installed_uv = tools.join("uv-0.13.10");
+        let young_stage = tools.join(format!("{EXTRACT_PREFIX}young"));
+        let old_stage = tools.join(format!("{EXTRACT_PREFIX}old"));
+        for dir in [&installed_uv, &young_stage, &old_stage] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        fs::write(installed_uv.join("uv"), vec![0u8; 10]).unwrap();
+        fs::write(young_stage.join("part"), vec![0u8; 20]).unwrap();
+        fs::write(old_stage.join("part"), vec![0u8; 40]).unwrap();
+        backdate_dir(&old_stage);
+
+        let u = usage(&f.home).unwrap();
+        assert_eq!(
+            u.stores
+                .iter()
+                .filter(|s| s.kind == Kind::Leftover)
+                .map(|s| (s.name.as_str(), s.size))
+                .collect::<Vec<_>>(),
+            [("tools/.zem-extract-old", 40)]
+        );
+        assert_eq!(
+            u.shared,
+            [("tools".to_string(), 30), ("cache/uv".to_string(), 1)]
+        );
+        assert_eq!(u.total(), 301 + 10 + 20 + 40);
     }
 }

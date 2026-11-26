@@ -126,14 +126,23 @@ fn lock_and_select_venv(
     plan: &mut SyncPlan,
     packages: Option<&[String]>,
 ) -> Result<FileLock> {
+    lock_and_select_venv_with(home, plan, packages, stores::lock)
+}
+
+fn lock_and_select_venv_with(
+    home: &ZemHome,
+    plan: &mut SyncPlan,
+    packages: Option<&[String]>,
+    acquire: impl Fn(&ZemHome, &str) -> Result<FileLock>,
+) -> Result<FileLock> {
     let shared_name = plan.venv_key.dir_name();
-    let shared_lock = stores::lock(home, &format!("venv-{shared_name}"))?;
+    let shared_lock = acquire(home, &format!("venv-{shared_name}"))?;
     plan.select_venv(home, packages);
     if plan.venv_name == shared_name {
         Ok(shared_lock)
     } else {
         drop(shared_lock);
-        stores::lock(home, &format!("venv-{}", plan.venv_name))
+        acquire(home, &format!("venv-{}", plan.venv_name))
     }
 }
 
@@ -232,12 +241,7 @@ fn run_steps(
     if uv.fetched {
         eprintln!("      {} downloaded uv {}", style("·").dim(), uv.version);
     }
-    let venv = VenvStore {
-        dir: &plan.venv_dir,
-        cfg: &cfg.python,
-        env: &env,
-        runner: &runner,
-    };
+    let mut venv = VenvStore::new(&plan.venv_dir, &cfg.python, &env, &runner);
     let created = venv.ensure_bootstrap(&uv.path, locked_packages)?;
     steps.done(outcome(
         created,
@@ -487,20 +491,33 @@ mod tests {
 
         // Pre-lock the shared venv before the locked project calls `lock_and_select_venv`.
         let held = stores::lock(&home, &format!("venv-{shared_name}")).unwrap();
-        let entered = Arc::new(Barrier::new(2));
-        let entered_bg = Arc::clone(&entered);
+        let contending = Arc::new(Barrier::new(2));
+        let contending_bg = Arc::clone(&contending);
         let home_bg = Arc::clone(&home);
+        let expected_shared_lock = format!("venv-{shared_name}");
         let locked_pkgs = vec!["west==1.4.0".to_string()];
         let handle = thread::spawn(move || {
-            entered_bg.wait();
-            let guard = lock_and_select_venv(&home_bg, &mut plan, Some(&locked_pkgs)).unwrap();
+            let guard = lock_and_select_venv_with(
+                &home_bg,
+                &mut plan,
+                Some(&locked_pkgs),
+                move |home, name| {
+                    if name == expected_shared_lock {
+                        // Prove we are actually contending on the held shared lock before
+                        // signalling the main thread to populate the marker and release it.
+                        assert!(stores::try_lock(home, name)?.is_none());
+                        contending_bg.wait();
+                    }
+                    stores::lock(home, name)
+                },
+            )
+            .unwrap();
             (plan, guard)
         });
 
-        entered.wait();
-        // Give the waiter a moment to block on the shared lock while we populate a different
-        // package set in the shared venv, then release the shared lock.
-        thread::sleep(std::time::Duration::from_millis(30));
+        // Wait until the background thread has observed lock contention on the shared lock,
+        // then populate a different package set in the shared venv and release the lock.
+        contending.wait();
         std::fs::create_dir_all(&shared_dir).unwrap();
         write_marker(
             &shared_dir,

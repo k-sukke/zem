@@ -767,7 +767,8 @@ mod venv_rebuild {
     use zem::home::ZemHome;
     use zem::process::Runner;
     use zem::store::venv::{
-        REQUIREMENTS_BASE, VenvMarker, VenvStore, bootstrap_packages, installed_packages,
+        Outcome, REQUIREMENTS_BASE, VenvMarker, VenvStore, bootstrap_packages, installed_packages,
+        requirements_digest,
     };
     use zem::store::{MARKER_SCHEMA, read_marker, write_marker};
     use zem::sync;
@@ -869,23 +870,34 @@ esac
         let cfg = Python::default(); // host_tools_via_pip = true -> triggers rebuild over ["west"]
 
         for installer in ["venv", "uv"] {
-            for fail_step in ["venv", "install"] {
+            for (fail_step, expected_err) in [
+                ("venv", "simulated uv venv failure"),
+                ("install", "simulated uv pip install failure"),
+            ] {
                 let venvs = tmp.path().join(format!("venvs-{installer}-{fail_step}"));
                 let dir = venvs.join("py3.12-shared");
+                let log = tmp.path().join(format!("uv-{installer}-{fail_step}.log"));
                 let old_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
                 seed_working_venv(&dir, installer, &old_pkgs);
 
                 let env = EnvBuilder::from_vars([
                     ("PATH", "/usr/bin:/bin"),
                     ("FAKE_UV_FAIL_STEP", fail_step),
+                    ("FAKE_UV_LOG", log.to_str().unwrap()),
                 ]);
-                let store = VenvStore {
-                    dir: &dir,
-                    cfg: &cfg,
-                    env: &env,
-                    runner: &runner,
-                };
-                assert!(store.ensure_bootstrap(&uv, None).is_err());
+                let mut store = VenvStore::new(&dir, &cfg, &env, &runner);
+                let err = store.ensure_bootstrap(&uv, None).unwrap_err();
+                assert!(
+                    err.to_string().contains(expected_err),
+                    "expected `{expected_err}`, got: {err}"
+                );
+                if fail_step == "install" {
+                    let recorded = fs::read_to_string(&log).unwrap();
+                    assert!(
+                        recorded.contains("venv ") && recorded.contains("pip install "),
+                        "install failure case must reach pip install after uv venv:\n{recorded}"
+                    );
+                }
 
                 assert_eq!(fs::read_to_string(dir.join("keep.txt")).unwrap(), "working");
                 assert!(
@@ -935,12 +947,7 @@ esac
             ("FAKE_UV_FREEZE", "cmake==4.0.0\nninja==1.12.1\nwest==1.5.0"),
             ("FAKE_UV_LOG", log.to_str().unwrap()),
         ]);
-        let store = VenvStore {
-            dir: &shared_dir,
-            cfg: &cfg,
-            env: &env,
-            runner: &runner,
-        };
+        let mut store = VenvStore::new(&shared_dir, &cfg, &env, &runner);
         store.ensure_bootstrap(&uv, None).unwrap();
         assert!(
             fs::read_to_string(&log).unwrap().contains("--relocatable"),
@@ -952,53 +959,53 @@ esac
         plan.select_venv(&home, Some(&other_locked));
         assert_ne!(plan.venv_name, shared_name);
 
-        // 2. Rebuild of an existing venv preserves its previous package record across bootstrap
-        // until `ensure_requirements` replaces it (and keeps it if requirements install fails).
-        let owner_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
-        seed_working_venv(&shared_dir, "venv", &owner_pkgs);
-        store.ensure_bootstrap(&uv, None).unwrap();
-        assert!(!shared_dir.join("keep.txt").exists(), "venv was replaced");
-        assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs.clone()));
-        assert_eq!(
-            read_marker::<VenvMarker>(&shared_dir)
-                .unwrap()
-                .requirements_sha256,
-            None
-        );
-        plan.select_venv(&home, Some(&other_locked));
-        assert_ne!(plan.venv_name, shared_name);
-
         let zephyr_base = tmp.path().join("zephyr");
         let req_path = zephyr_base.join(REQUIREMENTS_BASE);
         fs::create_dir_all(req_path.parent().unwrap()).unwrap();
         fs::write(&req_path, "PyYAML>=6.0\n").unwrap();
 
-        // Failing `ensure_requirements` still keeps `owner_pkgs` recorded.
-        let fail_env =
-            EnvBuilder::from_vars([("PATH", "/usr/bin:/bin"), ("FAKE_UV_FAIL_STEP", "install")]);
-        let failing_store = VenvStore {
-            env: &fail_env,
-            ..store
-        };
+        // 2. Rebuild of an existing venv keeps the previous venv intact at `shared_dir` until
+        // `ensure_requirements` succeeds (so a failure never publishes a bootstrap-only venv).
+        let owner_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
+        seed_working_venv(&shared_dir, "venv", &owner_pkgs);
+        let fail_req_env =
+            EnvBuilder::from_vars([("PATH", "/usr/bin:/bin"), ("FAKE_UV_FAIL_STEP", "freeze")]);
+        let mut failing_rebuild = VenvStore::new(&shared_dir, &cfg, &fail_req_env, &runner);
+        failing_rebuild.ensure_bootstrap(&uv, None).unwrap();
         assert!(
-            failing_store
-                .ensure_requirements(&uv, &zephyr_base, None)
-                .is_err()
+            shared_dir.join("keep.txt").is_file(),
+            "existing venv must remain usable until requirements succeed"
         );
-        assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs));
+        assert!(
+            failing_rebuild.west().is_file() && !failing_rebuild.west().starts_with(&shared_dir),
+            "rebuild should run west from the staged venv before publishing"
+        );
+        assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs.clone()));
+        plan.select_venv(&home, Some(&other_locked));
+        assert_ne!(plan.venv_name, shared_name);
 
-        // Succeeding `ensure_requirements` replaces the package record with the new freeze.
+        let err = failing_rebuild
+            .ensure_requirements(&uv, &zephyr_base, None)
+            .unwrap_err();
+        assert!(err.to_string().contains("simulated uv pip freeze failure"));
+        assert!(
+            shared_dir.join("keep.txt").is_file(),
+            "failed requirements install must leave previous venv untouched"
+        );
+        assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs.clone()));
+
+        // Succeeding rebuild replaces the venv and records the new freeze.
         let new_env = EnvBuilder::from_vars([
             ("PATH", "/usr/bin:/bin"),
             ("FAKE_UV_FREEZE", "PyYAML==6.0.2\nwest==1.5.0"),
         ]);
-        let new_store = VenvStore {
-            env: &new_env,
-            ..store
-        };
-        let (_, final_pkgs) = new_store
+        let mut new_store = VenvStore::new(&shared_dir, &cfg, &new_env, &runner);
+        new_store.ensure_bootstrap(&uv, None).unwrap();
+        let (outcome, final_pkgs) = new_store
             .ensure_requirements(&uv, &zephyr_base, None)
             .unwrap();
+        assert_eq!(outcome, Outcome::Created);
+        assert!(!shared_dir.join("keep.txt").exists(), "venv was replaced");
         assert_eq!(
             final_pkgs,
             vec!["PyYAML==6.0.2".to_string(), "west==1.5.0".to_string()]
@@ -1007,6 +1014,58 @@ esac
         assert_eq!(
             bootstrap_packages(&cfg),
             read_marker::<VenvMarker>(&shared_dir).unwrap().bootstrap
+        );
+
+        // 3. In-place `ensure_requirements` where install succeeds but freeze fails must clear
+        // the old completed digest while keeping `owner_pkgs`, so requesting the old digest
+        // afterwards re-runs installation instead of returning `Reused`.
+        let old_req = "PyYAML>=6.0\n";
+        let old_digest = requirements_digest(old_req, &cfg.extra_requirements);
+        write_marker(
+            &shared_dir,
+            &VenvMarker {
+                schema: MARKER_SCHEMA,
+                installer: "uv".to_string(),
+                python: cfg.version.clone(),
+                bootstrap: bootstrap_packages(&cfg),
+                requirements_sha256: Some(old_digest),
+                packages: Some(owner_pkgs.clone()),
+            },
+        )
+        .unwrap();
+        fs::write(&req_path, "PyYAML>=6.1\n").unwrap();
+        let freeze_fail_env =
+            EnvBuilder::from_vars([("PATH", "/usr/bin:/bin"), ("FAKE_UV_FAIL_STEP", "freeze")]);
+        let mut freeze_fail_store = VenvStore::new(&shared_dir, &cfg, &freeze_fail_env, &runner);
+        let err = freeze_fail_store
+            .ensure_requirements(&uv, &zephyr_base, None)
+            .unwrap_err();
+        assert!(err.to_string().contains("simulated uv pip freeze failure"));
+        assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs));
+        assert_eq!(
+            read_marker::<VenvMarker>(&shared_dir)
+                .unwrap()
+                .requirements_sha256,
+            None
+        );
+
+        // Requesting the old digest now must re-run install rather than returning `Reused`.
+        fs::write(&req_path, old_req).unwrap();
+        let retry_log = tmp.path().join("retry-uv.log");
+        let retry_env = EnvBuilder::from_vars([
+            ("PATH", "/usr/bin:/bin"),
+            ("FAKE_UV_FREEZE", "PyYAML==6.0.1\nwest==1.5.0"),
+            ("FAKE_UV_LOG", retry_log.to_str().unwrap()),
+        ]);
+        let mut retry_store = VenvStore::new(&shared_dir, &cfg, &retry_env, &runner);
+        let (retry_outcome, _) = retry_store
+            .ensure_requirements(&uv, &zephyr_base, None)
+            .unwrap();
+        assert_eq!(retry_outcome, Outcome::Created);
+        assert!(
+            fs::read_to_string(&retry_log)
+                .unwrap()
+                .contains("pip install ")
         );
     }
 }
