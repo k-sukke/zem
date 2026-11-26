@@ -755,3 +755,258 @@ fn doctor_runs_without_project() {
         .stdout(predicate::str::contains("ZEM_HOME"))
         .stdout(predicate::str::contains("zem init"));
 }
+
+#[cfg(unix)]
+mod venv_rebuild {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+
+    use zem::config::{self, Python};
+    use zem::env::EnvBuilder;
+    use zem::home::ZemHome;
+    use zem::process::Runner;
+    use zem::store::venv::{
+        REQUIREMENTS_BASE, VenvMarker, VenvStore, bootstrap_packages, installed_packages,
+    };
+    use zem::store::{MARKER_SCHEMA, read_marker, write_marker};
+    use zem::sync;
+
+    fn write_exec(path: &Path, body: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Fake `uv` implementing `venv`, `pip install` and `pip freeze`, controlled via env vars:
+    /// - `FAKE_UV_FAIL_STEP`: `venv`, `install` or `freeze` to fail that subcommand.
+    /// - `FAKE_UV_FREEZE`: newline-separated freeze output.
+    /// - `FAKE_UV_LOG`: file recording every invocation.
+    fn fake_uv(dir: &Path) -> PathBuf {
+        let path = dir.join("uv");
+        write_exec(
+            &path,
+            r#"#!/bin/sh
+set -eu
+if [ -n "${FAKE_UV_LOG:-}" ]; then
+    printf '%s\n' "$*" >> "$FAKE_UV_LOG"
+fi
+sub="$1"
+shift
+case "$sub" in
+    venv)
+        if [ "${FAKE_UV_FAIL_STEP:-}" = "venv" ]; then
+            echo "simulated uv venv failure" >&2
+            exit 1
+        fi
+        target="$1"
+        mkdir -p "$target/bin"
+        printf '#!/bin/sh\nexit 0\n' > "$target/bin/python"
+        chmod +x "$target/bin/python"
+        ;;
+    pip)
+        op="$1"
+        shift
+        case "$op" in
+            install)
+                if [ "${FAKE_UV_FAIL_STEP:-}" = "install" ]; then
+                    echo "simulated uv pip install failure" >&2
+                    exit 1
+                fi
+                py=""
+                while [ $# -gt 0 ]; do
+                    if [ "$1" = "--python" ]; then
+                        py="$2"
+                        shift 2
+                    else
+                        shift
+                    fi
+                done
+                bin_dir="$(dirname "$py")"
+                for exe in west cmake ninja; do
+                    printf '#!/bin/sh\nexit 0\n' > "$bin_dir/$exe"
+                    chmod +x "$bin_dir/$exe"
+                done
+                ;;
+            freeze)
+                if [ "${FAKE_UV_FAIL_STEP:-}" = "freeze" ]; then
+                    echo "simulated uv pip freeze failure" >&2
+                    exit 1
+                fi
+                printf '%s\n' "${FAKE_UV_FREEZE:-west==1.5.0}"
+                ;;
+        esac
+        ;;
+esac
+"#,
+        );
+        path
+    }
+
+    fn seed_working_venv(dir: &Path, installer: &str, packages: &[String]) {
+        write_exec(&dir.join("bin/python"), "#!/bin/sh\necho old-python\n");
+        write_exec(&dir.join("bin/west"), "#!/bin/sh\necho old-west\n");
+        fs::write(dir.join("keep.txt"), "working").unwrap();
+        write_marker(
+            dir,
+            &VenvMarker {
+                schema: MARKER_SCHEMA,
+                installer: installer.to_string(),
+                python: "3.12".to_string(),
+                bootstrap: vec!["west".to_string()],
+                requirements_sha256: Some("old-sha".to_string()),
+                packages: Some(packages.to_vec()),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn failed_bootstrap_preserves_existing_environment_for_all_installers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let uv = fake_uv(tmp.path());
+        let runner = Runner::new(None, false).unwrap();
+        let cfg = Python::default(); // host_tools_via_pip = true -> triggers rebuild over ["west"]
+
+        for installer in ["venv", "uv"] {
+            for fail_step in ["venv", "install"] {
+                let venvs = tmp.path().join(format!("venvs-{installer}-{fail_step}"));
+                let dir = venvs.join("py3.12-shared");
+                let old_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
+                seed_working_venv(&dir, installer, &old_pkgs);
+
+                let env = EnvBuilder::from_vars([
+                    ("PATH", "/usr/bin:/bin"),
+                    ("FAKE_UV_FAIL_STEP", fail_step),
+                ]);
+                let store = VenvStore {
+                    dir: &dir,
+                    cfg: &cfg,
+                    env: &env,
+                    runner: &runner,
+                };
+                assert!(store.ensure_bootstrap(&uv, None).is_err());
+
+                assert_eq!(fs::read_to_string(dir.join("keep.txt")).unwrap(), "working");
+                assert!(
+                    fs::read_to_string(dir.join("bin/west"))
+                        .unwrap()
+                        .contains("old-west")
+                );
+                let marker = read_marker::<VenvMarker>(&dir).unwrap();
+                assert_eq!(marker.installer, installer);
+                assert_eq!(marker.packages, Some(old_pkgs));
+
+                let entries: Vec<_> = fs::read_dir(&venvs)
+                    .unwrap()
+                    .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                    .collect();
+                assert_eq!(entries, ["py3.12-shared"], "staging dir must be cleaned up");
+            }
+        }
+    }
+
+    #[test]
+    fn rebuild_and_fresh_bootstrap_never_expose_unowned_shared_venv() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = ZemHome::new(tmp.path().join("home"));
+        let proj = tmp.path().join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        fs::write(
+            proj.join(config::CONFIG_FILE_NAME),
+            "schema = 1\n[project]\nname = \"p\"\n[zephyr]\nversion = \"v4.2.0\"\n\
+             [target]\nboard = \"esp32c3_devkitm\"\n",
+        )
+        .unwrap();
+        let loaded = config::load(&proj).unwrap();
+        let mut plan = sync::plan(&loaded, &home).unwrap();
+        let shared_dir = home.venv_dir(&plan.venv_key);
+        let shared_name = plan.venv_key.dir_name();
+
+        let uv = fake_uv(tmp.path());
+        let log = tmp.path().join("uv.log");
+        let runner = Runner::new(None, false).unwrap();
+        let cfg = Python::default();
+
+        // 1. Fresh unlocked bootstrap records bootstrap freeze immediately, so a locked project
+        // with a different package set never treats an interrupted shared venv as unowned.
+        let env = EnvBuilder::from_vars([
+            ("PATH", "/usr/bin:/bin"),
+            ("FAKE_UV_FREEZE", "cmake==4.0.0\nninja==1.12.1\nwest==1.5.0"),
+            ("FAKE_UV_LOG", log.to_str().unwrap()),
+        ]);
+        let store = VenvStore {
+            dir: &shared_dir,
+            cfg: &cfg,
+            env: &env,
+            runner: &runner,
+        };
+        store.ensure_bootstrap(&uv, None).unwrap();
+        assert!(
+            fs::read_to_string(&log).unwrap().contains("--relocatable"),
+            "staged venv must be relocatable"
+        );
+        assert!(installed_packages(&shared_dir).is_some());
+
+        let other_locked = vec!["PyYAML==6.0.2".to_string(), "west==1.4.0".to_string()];
+        plan.select_venv(&home, Some(&other_locked));
+        assert_ne!(plan.venv_name, shared_name);
+
+        // 2. Rebuild of an existing venv preserves its previous package record across bootstrap
+        // until `ensure_requirements` replaces it (and keeps it if requirements install fails).
+        let owner_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
+        seed_working_venv(&shared_dir, "venv", &owner_pkgs);
+        store.ensure_bootstrap(&uv, None).unwrap();
+        assert!(!shared_dir.join("keep.txt").exists(), "venv was replaced");
+        assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs.clone()));
+        assert_eq!(
+            read_marker::<VenvMarker>(&shared_dir)
+                .unwrap()
+                .requirements_sha256,
+            None
+        );
+        plan.select_venv(&home, Some(&other_locked));
+        assert_ne!(plan.venv_name, shared_name);
+
+        let zephyr_base = tmp.path().join("zephyr");
+        let req_path = zephyr_base.join(REQUIREMENTS_BASE);
+        fs::create_dir_all(req_path.parent().unwrap()).unwrap();
+        fs::write(&req_path, "PyYAML>=6.0\n").unwrap();
+
+        // Failing `ensure_requirements` still keeps `owner_pkgs` recorded.
+        let fail_env =
+            EnvBuilder::from_vars([("PATH", "/usr/bin:/bin"), ("FAKE_UV_FAIL_STEP", "install")]);
+        let failing_store = VenvStore {
+            env: &fail_env,
+            ..store
+        };
+        assert!(
+            failing_store
+                .ensure_requirements(&uv, &zephyr_base, None)
+                .is_err()
+        );
+        assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs));
+
+        // Succeeding `ensure_requirements` replaces the package record with the new freeze.
+        let new_env = EnvBuilder::from_vars([
+            ("PATH", "/usr/bin:/bin"),
+            ("FAKE_UV_FREEZE", "PyYAML==6.0.2\nwest==1.5.0"),
+        ]);
+        let new_store = VenvStore {
+            env: &new_env,
+            ..store
+        };
+        let (_, final_pkgs) = new_store
+            .ensure_requirements(&uv, &zephyr_base, None)
+            .unwrap();
+        assert_eq!(
+            final_pkgs,
+            vec!["PyYAML==6.0.2".to_string(), "west==1.5.0".to_string()]
+        );
+        assert_eq!(installed_packages(&shared_dir), Some(final_pkgs));
+        assert_eq!(
+            bootstrap_packages(&cfg),
+            read_marker::<VenvMarker>(&shared_dir).unwrap().bootstrap
+        );
+    }
+}

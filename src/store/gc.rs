@@ -180,6 +180,12 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
         (Kind::Venv, home.venvs_dir(), &refs.venvs, "venv"),
     ] {
         for (name, path) in subdirs(&dir) {
+            if name.starts_with(EXTRACT_PREFIX) {
+                if is_old(&path) {
+                    stores.push(leftover(format!("{prefix}s/{name}"), path, None));
+                }
+                continue;
+            }
             stores.push(Store {
                 kind,
                 size: fsutil::dir_size(&path),
@@ -531,5 +537,16 @@ mod tests {
         fs::remove_file(a.join(PROJECT_STATE_DIR).join(STATE_FILE)).unwrap();
         let report = collect(&f.home, true).unwrap();
         assert_eq!(names(&report.removed), ["ws-old", "py-old", "0.16.8"]);
+    }
+
+    #[test]
+    fn gc_ignores_active_venv_staging_dirs() {
+        let f = fixture();
+        project(&f, "a", "riscv64-zephyr-elf");
+        let staged = f.home.venvs_dir().join(format!("{EXTRACT_PREFIX}active"));
+        fs::create_dir_all(&staged).unwrap();
+        let report = collect(&f.home, false).unwrap();
+        assert!(staged.is_dir(), "young staging dir must not be removed");
+        assert!(!report.removed.iter().any(|s| s.path == staged));
     }
 }

@@ -11,6 +11,7 @@ use crate::env::{EnvBuilder, EnvLocations, zem_env};
 use crate::error::{Result, ZemError};
 use crate::fsutil;
 use crate::home::ZemHome;
+use crate::lock::FileLock;
 use crate::lockfile::{self, Lockfile, Pins, PythonLock, SdkLock, ZephyrLock};
 use crate::platform;
 use crate::process::Runner;
@@ -117,6 +118,25 @@ fn package_diff(locked: &[String], actual: &[String]) -> (String, String) {
     (only(locked, actual), only(actual, locked))
 }
 
+/// Decide between the shared venv and a package-dedicated sibling while holding the shared
+/// venv lock, keeping that lock when the shared venv is chosen and switching to the sibling's
+/// lock otherwise so no concurrent rebuild can race the decision.
+fn lock_and_select_venv(
+    home: &ZemHome,
+    plan: &mut SyncPlan,
+    packages: Option<&[String]>,
+) -> Result<FileLock> {
+    let shared_name = plan.venv_key.dir_name();
+    let shared_lock = stores::lock(home, &format!("venv-{shared_name}"))?;
+    plan.select_venv(home, packages);
+    if plan.venv_name == shared_name {
+        Ok(shared_lock)
+    } else {
+        drop(shared_lock);
+        stores::lock(home, &format!("venv-{}", plan.venv_name))
+    }
+}
+
 pub fn run(
     loaded: &LoadedConfig,
     home: &ZemHome,
@@ -186,7 +206,6 @@ fn run_steps(
         );
         plan.pin_commit(loaded, home, &commit);
     }
-    plan.select_venv(home, pins.packages.as_deref());
     let constraints = match &pins.packages {
         Some(packages) => {
             let path = project.state_dir().join("constraints.txt");
@@ -197,9 +216,10 @@ fn run_steps(
     };
 
     let ws_key = plan.workspace_key.dir_name();
-    let venv_key = plan.venv_name.clone();
     let _ws_lock = stores::lock(home, &format!("workspace-{ws_key}"))?;
-    let _venv_lock = stores::lock(home, &format!("venv-{venv_key}"))?;
+    let _venv_lock = lock_and_select_venv(home, &mut plan, pins.packages.as_deref())?;
+    let venv_key = plan.venv_name.clone();
+    let locked_packages = pins.packages.as_deref().zip(constraints.as_deref());
 
     let env = sync_env(home, &plan, cfg);
 
@@ -218,7 +238,7 @@ fn run_steps(
         env: &env,
         runner: &runner,
     };
-    let created = venv.ensure_bootstrap(&uv.path, constraints.as_deref())?;
+    let created = venv.ensure_bootstrap(&uv.path, locked_packages)?;
     steps.done(outcome(
         created,
         &format!("reused {venv_key}"),
@@ -278,7 +298,6 @@ fn run_steps(
     ));
 
     steps.begin("Python requirements");
-    let locked_packages = pins.packages.as_deref().zip(constraints.as_deref());
     let (created, packages) =
         venv.ensure_requirements(&uv.path, &ws.zephyr_base, locked_packages)?;
     if let Some(locked) = &pins.packages
@@ -408,4 +427,113 @@ fn run_steps(
     steps.done(format!("{lock_note}, {}", project.state_path().display()));
 
     Ok(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    use super::*;
+    use crate::config;
+    use crate::store::venv::VenvMarker;
+    use crate::store::{MARKER_SCHEMA, write_marker};
+    use crate::sync;
+
+    fn test_plan(project_root: &std::path::Path, home: &ZemHome) -> SyncPlan {
+        std::fs::write(
+            project_root.join(config::CONFIG_FILE_NAME),
+            "schema = 1\n[project]\nname = \"p\"\n[zephyr]\nversion = \"v4.2.0\"\n\
+             [target]\nboard = \"esp32c3_devkitm\"\n",
+        )
+        .unwrap();
+        let loaded = config::load(project_root).unwrap();
+        sync::plan(&loaded, home).unwrap()
+    }
+
+    #[test]
+    fn lock_and_select_venv_keeps_shared_lock_when_selected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = ZemHome::new(tmp.path().join("home"));
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let mut plan = test_plan(&proj, &home);
+        let shared = plan.venv_key.dir_name();
+
+        let guard = lock_and_select_venv(&home, &mut plan, None).unwrap();
+        assert_eq!(plan.venv_name, shared);
+        assert!(
+            stores::try_lock(&home, &format!("venv-{shared}"))
+                .unwrap()
+                .is_none()
+        );
+        drop(guard);
+        assert!(
+            stores::try_lock(&home, &format!("venv-{shared}"))
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn lock_and_select_venv_observes_state_written_under_shared_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = Arc::new(ZemHome::new(tmp.path().join("home")));
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let mut plan = test_plan(&proj, &home);
+        let shared_name = plan.venv_key.dir_name();
+        let shared_dir = home.venv_dir(&plan.venv_key);
+
+        // Pre-lock the shared venv before the locked project calls `lock_and_select_venv`.
+        let held = stores::lock(&home, &format!("venv-{shared_name}")).unwrap();
+        let entered = Arc::new(Barrier::new(2));
+        let entered_bg = Arc::clone(&entered);
+        let home_bg = Arc::clone(&home);
+        let locked_pkgs = vec!["west==1.4.0".to_string()];
+        let handle = thread::spawn(move || {
+            entered_bg.wait();
+            let guard = lock_and_select_venv(&home_bg, &mut plan, Some(&locked_pkgs)).unwrap();
+            (plan, guard)
+        });
+
+        entered.wait();
+        // Give the waiter a moment to block on the shared lock while we populate a different
+        // package set in the shared venv, then release the shared lock.
+        thread::sleep(std::time::Duration::from_millis(30));
+        std::fs::create_dir_all(&shared_dir).unwrap();
+        write_marker(
+            &shared_dir,
+            &VenvMarker {
+                schema: MARKER_SCHEMA,
+                installer: "uv".to_string(),
+                python: "3.12".to_string(),
+                bootstrap: vec!["west".to_string()],
+                requirements_sha256: Some("abc".to_string()),
+                packages: Some(vec!["west==1.5.0".to_string()]),
+            },
+        )
+        .unwrap();
+        drop(held);
+
+        let (selected_plan, dedicated_guard) = handle.join().unwrap();
+        assert_ne!(selected_plan.venv_name, shared_name);
+        assert!(
+            selected_plan
+                .venv_name
+                .starts_with(&format!("{shared_name}-"))
+        );
+        // Shared lock was released; dedicated lock is held.
+        assert!(
+            stores::try_lock(&home, &format!("venv-{shared_name}"))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            stores::try_lock(&home, &format!("venv-{}", selected_plan.venv_name))
+                .unwrap()
+                .is_none()
+        );
+        drop(dedicated_guard);
+    }
 }
