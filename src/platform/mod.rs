@@ -96,8 +96,15 @@ pub fn venv_python(venv: &Path) -> PathBuf {
     venv_bin_dir(venv).join(exe_name("python"))
 }
 
-pub fn python_candidates() -> &'static [&'static str] {
-    imp::PYTHON_CANDIDATES
+/// Target triple of the uv release asset for this host (`uv-<target>.tar.gz`), or `None`.
+pub fn uv_target() -> Option<&'static str> {
+    match (Os::current(), arch_name()) {
+        (Os::MacOs, "aarch64") => Some("aarch64-apple-darwin"),
+        (Os::MacOs, "x86_64") => Some("x86_64-apple-darwin"),
+        (Os::Linux, "x86_64") => Some("x86_64-unknown-linux-musl"),
+        (Os::Linux, "aarch64") => Some("aarch64-unknown-linux-musl"),
+        _ => None,
+    }
 }
 
 /// Environment variable names are case-insensitive on Windows (`Path` == `PATH`).

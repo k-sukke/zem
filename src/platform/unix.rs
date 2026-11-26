@@ -9,7 +9,6 @@ use super::{InstallHint, Os, SerialAccess};
 pub const EXE_SUFFIX: &str = "";
 pub const SDK_ARCHIVE_EXT: &str = ".tar.xz";
 pub const VENV_BIN_DIR: &str = "bin";
-pub const PYTHON_CANDIDATES: &[&str] = &["python3", "python"];
 
 pub const STRICT_ENV_ALLOWLIST: &[&str] = &[
     "HOME",
@@ -92,25 +91,12 @@ pub fn install_hint(os: Os, tool: &str) -> Option<InstallHint> {
     let hint = |command, alternative| Some(InstallHint::new(command, alternative));
     match (os, tool) {
         (Os::MacOs, "git") => hint("xcode-select --install", Some("brew install git")),
-        (Os::MacOs, "uv") => hint(
-            "brew install uv",
-            Some("curl -LsSf https://astral.sh/uv/install.sh | sh"),
-        ),
-        (Os::MacOs, "python") => hint(
-            "brew install python@3.12",
-            Some("install uv and let zem manage Python"),
-        ),
         (Os::MacOs, "cmake") => hint("brew install cmake", None),
         (Os::MacOs, "ninja") => hint("brew install ninja", None),
         (Os::MacOs, "dtc") => hint("brew install dtc", None),
         (Os::Linux, "git") => hint(
             "sudo apt install git",
             Some("your distribution's equivalent"),
-        ),
-        (Os::Linux, "uv") => hint("curl -LsSf https://astral.sh/uv/install.sh | sh", None),
-        (Os::Linux, "python") => hint(
-            "sudo apt install python3 python3-venv",
-            Some("install uv and let zem manage Python"),
         ),
         (Os::Linux, "cmake") => hint("sudo apt install cmake", None),
         (Os::Linux, "ninja") => hint("sudo apt install ninja-build", None),

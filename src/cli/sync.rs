@@ -15,7 +15,7 @@ pub struct SyncArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Stream the output of west, uv and pip instead of only logging it
+    /// Stream the output of west and uv instead of only logging it
     #[arg(short, long)]
     pub verbose: bool,
 

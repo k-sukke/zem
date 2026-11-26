@@ -4,7 +4,8 @@ use super::{Check, Report, Status};
 use crate::config::{self, LoadedConfig};
 use crate::home::ZemHome;
 use crate::platform::{self, Os, SerialAccess};
-use crate::tools::{self, MIN_CMAKE, MIN_PYTHON, Probe, ToolSpec};
+use crate::store::uv::UV_VERSION;
+use crate::tools::{self, MIN_CMAKE, Probe, ToolSpec};
 use crate::{serial, session, sync};
 
 const CONFLICTING_VARS: &[&str] = &[
@@ -25,16 +26,17 @@ const SYNCED_FOLDER_MARKERS: &[&str] = &["mobile documents", "onedrive", "dropbo
 
 pub fn collect(cwd: &Path) -> Report {
     let project = config::load(cwd);
-    let host_tools_via_pip = project
+    let install_cmake_ninja = project
         .as_ref()
-        .map(|p| p.config.python.host_tools_via_pip)
+        .map(|p| p.config.python.install_cmake_ninja)
         .unwrap_or(true);
+    let home = ZemHome::resolve().ok();
 
     Report {
         sections: vec![
             ("Host", host_checks()),
-            ("Required tools", required_tool_checks()),
-            ("Build tools", build_tool_checks(host_tools_via_pip)),
+            ("Required tools", required_tool_checks(home.as_ref())),
+            ("Build tools", build_tool_checks(install_cmake_ninja)),
             ("Environment", environment_checks()),
             ("Project", project_checks(project)),
         ],
@@ -94,94 +96,52 @@ fn missing(status: Status, spec: &ToolSpec, detail: &str) -> Check {
     Check::new(status, spec.name, detail).install(platform::install_hint(spec.name))
 }
 
-fn required_tool_checks() -> Vec<Check> {
-    let mut checks = Vec::new();
-
-    checks.push(match tools::probe(&tools::GIT) {
+fn required_tool_checks(home: Option<&ZemHome>) -> Vec<Check> {
+    let git = match tools::probe(&tools::GIT) {
         Some(p) => Check::new(Status::Ok, "git", describe(&p)),
         None => missing(Status::Fail, &tools::GIT, "not found (required by west)"),
-    });
-
-    let uv = tools::probe(&tools::UV);
-    let python_spec = tools::python();
-    let python = tools::probe(&python_spec);
-    match &uv {
-        Some(p) => checks.push(Check::new(
+    };
+    // zem downloads the uv it uses; a uv on the host is never used.
+    let uv = match home.map(|h| h.uv_bin(UV_VERSION)).filter(|b| b.is_file()) {
+        Some(bin) => Check::new(
             Status::Ok,
             "uv",
-            format!("{} — manages Python for zem", describe(p)),
-        )),
-        None => checks.push(
-            Check::new(
-                Status::Info,
-                "uv",
-                "not found; falling back to the system Python (slower)",
-            )
-            .install(platform::install_hint("uv")),
+            format!("{UV_VERSION} (managed by zem, {})", bin.display()),
         ),
-    }
-    let python_check = match (&python, &uv) {
-        (Some(p), _) if p.version.is_some_and(|v| v >= MIN_PYTHON) => {
-            Check::new(Status::Ok, "python", describe(p))
-        }
-        (Some(p), Some(_)) => Check::new(
+        None => Check::new(
             Status::Info,
-            "python",
-            format!(
-                "{} is older than {MIN_PYTHON}; uv will provide a newer one",
-                describe(p)
-            ),
-        ),
-        (Some(p), None) => missing(
-            Status::Fail,
-            &python_spec,
-            &format!("{} is older than {MIN_PYTHON}", describe(p)),
-        ),
-        (None, Some(_)) => Check::new(Status::Info, "python", "not found; uv will provide one"),
-        (None, None) => missing(
-            Status::Fail,
-            &python_spec,
-            "not found (install uv or Python 3.10+)",
+            "uv",
+            format!("{UV_VERSION} will be downloaded by `zem sync`"),
         ),
     };
-    checks.push(python_check);
-    checks
+    vec![git, uv]
 }
 
-fn build_tool_checks(host_tools_via_pip: bool) -> Vec<Check> {
+fn build_tool_checks(install_cmake_ninja: bool) -> Vec<Check> {
     let mut checks = Vec::new();
-    for (spec, min) in [(tools::CMAKE, Some(MIN_CMAKE)), (tools::NINJA, None)] {
-        let check = match (tools::probe(&spec), host_tools_via_pip) {
-            (Some(p), true) => Check::new(
-                Status::Info,
-                spec.name,
-                format!(
-                    "host {} found; zem uses its own copy in the venv",
-                    describe(&p)
+    if install_cmake_ninja {
+        checks.push(Check::new(
+            Status::Info,
+            "cmake, ninja",
+            "installed into the project venv by `zem sync`",
+        ));
+    } else {
+        for (spec, min) in [(tools::CMAKE, Some(MIN_CMAKE)), (tools::NINJA, None)] {
+            let check = match tools::probe(&spec) {
+                Some(p) if min.is_some_and(|m| p.version.is_some_and(|v| v < m)) => missing(
+                    Status::Fail,
+                    &spec,
+                    &format!("{} is older than {}", describe(&p), MIN_CMAKE),
                 ),
-            ),
-            (None, true) => Check::new(
-                Status::Info,
-                spec.name,
-                "will be installed into the venv by `zem sync`",
-            ),
-            (Some(p), false) if min.is_some_and(|m| p.version.is_some_and(|v| v < m)) => missing(
-                Status::Fail,
-                &spec,
-                &format!(
-                    "{} is older than {}",
-                    describe(&p),
-                    min.unwrap_or(MIN_CMAKE)
+                Some(p) => Check::new(Status::Ok, spec.name, describe(&p)),
+                None => missing(
+                    Status::Fail,
+                    &spec,
+                    "not found (required because [python].install_cmake_ninja = false)",
                 ),
-            ),
-            (Some(p), false) => Check::new(Status::Ok, spec.name, describe(&p)),
-            (None, false) => missing(
-                Status::Fail,
-                &spec,
-                "not found (required because [python].host_tools_via_pip = false)",
-            ),
-        };
-        checks.push(check);
+            };
+            checks.push(check);
+        }
     }
 
     checks.push(match tools::probe(&tools::DTC) {
@@ -198,14 +158,14 @@ fn build_tool_checks(host_tools_via_pip: bool) -> Vec<Check> {
             Status::Info,
             "west",
             format!(
-                "global {} is ignored; zem installs west per environment",
+                "global {} is ignored; zem runs west from its own venv",
                 describe(&p)
             ),
         ),
         None => Check::new(
             Status::Ok,
             "west",
-            "not needed globally; zem installs it per environment",
+            "not needed globally; zem runs west from its own venv",
         ),
     });
     checks

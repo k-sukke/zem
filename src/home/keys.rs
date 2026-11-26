@@ -83,12 +83,14 @@ impl WorkspaceKey {
     }
 }
 
+/// Project venv: one per Zephyr workspace and Python setup. Locked projects with a different
+/// package set get a sibling directory (see `store::venv::select_project`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VenvKey {
     workspace: WorkspaceKey,
     python: String,
     extra_requirements: Vec<String>,
-    host_tools_via_pip: bool,
+    install_cmake_ninja: bool,
 }
 
 impl VenvKey {
@@ -96,7 +98,7 @@ impl VenvKey {
         workspace: WorkspaceKey,
         python: &str,
         extra_requirements: &[String],
-        host_tools_via_pip: bool,
+        install_cmake_ninja: bool,
     ) -> Self {
         let mut extra: Vec<String> = extra_requirements
             .iter()
@@ -108,13 +110,13 @@ impl VenvKey {
             workspace,
             python: python.trim().to_string(),
             extra_requirements: extra,
-            host_tools_via_pip,
+            install_cmake_ninja,
         }
     }
 
     pub fn dir_name(&self) -> String {
         let extra = self.extra_requirements.join("\n");
-        let host_tools = if self.host_tools_via_pip { "1" } else { "0" };
+        let build_tools = if self.install_cmake_ninja { "1" } else { "0" };
         format!(
             "py{}-{}",
             slug(&self.python, 8),
@@ -125,8 +127,39 @@ impl VenvKey {
                     &self.workspace.revision,
                     &self.python,
                     &extra,
-                    host_tools
+                    build_tools
                 ],
+            )
+        )
+    }
+}
+
+/// The shared venv that runs west before a workspace exists. It depends only on the Python
+/// version and the bootstrap packages, so every project with the same pair reuses it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WestVenvKey {
+    python: String,
+    packages: Vec<String>,
+}
+
+impl WestVenvKey {
+    pub fn new(python: &str, packages: &[String]) -> Self {
+        let mut packages: Vec<String> = packages.iter().map(|p| p.trim().to_string()).collect();
+        packages.sort();
+        packages.dedup();
+        WestVenvKey {
+            python: python.trim().to_string(),
+            packages,
+        }
+    }
+
+    pub fn dir_name(&self) -> String {
+        format!(
+            "west-py{}-{}",
+            slug(&self.python, 8),
+            short_hash(
+                "zem-west-venv-v1",
+                &[&self.python, &self.packages.join("\n")]
             )
         )
     }

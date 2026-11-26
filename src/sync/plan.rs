@@ -25,7 +25,10 @@ pub struct SyncPlan {
     pub unresolved_branch: bool,
     pub venv_key: VenvKey,
     pub venv_name: String,
+    /// Where `venv_name` lives. The venv sync uses can be a sibling of this one.
     pub venv_dir: PathBuf,
+    /// The shared west venv that runs west before and during the workspace update.
+    pub west_dir: PathBuf,
     pub sdk_version: SdkVersion,
     pub sdk_dir: Option<PathBuf>,
     pub lock: Option<Lockfile>,
@@ -52,12 +55,8 @@ pub fn plan(loaded: &LoadedConfig, home: &ZemHome) -> Result<SyncPlan> {
         SdkVersion::Auto => None,
     };
 
-    let locked_packages = lock
-        .as_ref()
-        .filter(|l| l.zephyr.matches(cfg) && l.python.matches(&cfg.python))
-        .map(|l| l.python.packages.clone());
     let (workspace_key, venv_key) = keys(loaded, workspace_revision);
-    let mut plan = SyncPlan {
+    let plan = SyncPlan {
         modules: project_modules(cfg, &validated.target),
         zem_home: home.root().to_path_buf(),
         target: validated.target,
@@ -65,6 +64,7 @@ pub fn plan(loaded: &LoadedConfig, home: &ZemHome) -> Result<SyncPlan> {
         workspace_dir: home.workspace_dir(&workspace_key),
         workspace_key,
         unresolved_branch: branch && locked_commit.is_none(),
+        west_dir: venv::west_dir(home, &cfg.python.version),
         venv_name: venv_key.dir_name(),
         venv_dir: home.venv_dir(&venv_key),
         venv_key,
@@ -73,7 +73,6 @@ pub fn plan(loaded: &LoadedConfig, home: &ZemHome) -> Result<SyncPlan> {
         lock,
         warnings: validated.warnings,
     };
-    plan.select_venv(home, locked_packages.as_deref());
     Ok(plan)
 }
 
@@ -84,7 +83,7 @@ fn keys(loaded: &LoadedConfig, revision: &str) -> (WorkspaceKey, VenvKey) {
         workspace.clone(),
         &cfg.python.version,
         &cfg.python.extra_requirements,
-        cfg.python.host_tools_via_pip,
+        cfg.python.install_cmake_ninja,
     );
     (workspace, venv)
 }
@@ -99,21 +98,6 @@ impl SyncPlan {
         self.venv_dir = home.venv_dir(&venv_key);
         self.venv_key = venv_key;
         self.unresolved_branch = false;
-    }
-
-    /// Pick the shared venv, or a sibling dedicated to `packages` when the shared one was
-    /// installed with different versions, so locked projects never reinstall packages under
-    /// another project sharing the same venv key.
-    pub fn select_venv(&mut self, home: &ZemHome, packages: Option<&[String]>) {
-        self.venv_name = self.venv_key.dir_name();
-        self.venv_dir = home.venv_dir(&self.venv_key);
-        if let Some(packages) = packages
-            && venv::installed_packages(&self.venv_dir).is_some_and(|p| p != packages)
-        {
-            let digest = lockfile::packages_digest(packages);
-            self.venv_name = format!("{}-{}", self.venv_name, &digest[..8]);
-            self.venv_dir = home.venvs_dir().join(&self.venv_name);
-        }
     }
 
     pub fn render(&self) -> String {
@@ -152,6 +136,7 @@ impl SyncPlan {
             ("modules", modules.join(", ")),
             ("ZEM_HOME", self.zem_home.display().to_string()),
             ("workspace", workspace),
+            ("west venv", self.west_dir.display().to_string()),
             ("venv", self.venv_dir.display().to_string()),
             ("sdk", sdk),
             ("lock", lock),

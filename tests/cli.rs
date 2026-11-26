@@ -222,7 +222,7 @@ fn sync_reports_config_errors_with_location() {
 
 #[cfg(unix)]
 #[test]
-fn sync_without_python_installer_fails_before_downloading() {
+fn sync_without_git_fails_before_downloading() {
     let sb = Sandbox::new();
     sb.init("esp32c3_devkitm");
     let empty_path = tempfile::tempdir().unwrap();
@@ -231,7 +231,7 @@ fn sync_without_python_installer_fails_before_downloading() {
         .arg("sync")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("uv was not found"));
+        .stderr(predicate::str::contains("git was not found"));
     let ignore = fs::read_to_string(sb.path().join(".zem").join(".gitignore")).unwrap();
     assert!(ignore.lines().any(|l| l == "*"));
     assert!(
@@ -240,6 +240,7 @@ fn sync_without_python_installer_fails_before_downloading() {
             .next()
             .is_none()
     );
+    assert!(!sb.zem_home.path().join("tools").join("uv").exists());
 }
 
 #[test]
@@ -319,7 +320,7 @@ commit = "{commit}"
 version = "0.17.2"
 [python]
 version = "3.12"
-host-tools-via-pip = true
+install-cmake-ninja = true
 packages = []
 "#
         ),

@@ -131,7 +131,7 @@ pub struct EnvSpec {
     pub target: ResolvedTarget,
     pub workspace: WorkspaceKey,        // (zephyr url, revision)
     pub modules: BTreeSet<String>,      // このプロジェクトが使うモジュール（hal_espressif + features + extra）
-    pub venv: VenvKey,                  // (WorkspaceKey, python version, extra_requirements, host_tools_via_pip)
+    pub venv: VenvKey,                  // (WorkspaceKey, python version, extra_requirements, install_cmake_ninja)
     pub sdk: SdkKey,                    // (SDK version, toolchains)
 }
 
@@ -147,7 +147,7 @@ pub trait Store {
 
 sync の手順:
 
-1. **venv（bootstrap）**: venv を作成し `west`（`host_tools_via_pip` なら `cmake` / `ninja` も）を入れる
+1. **venv（bootstrap）**: venv を作成し `west`（`install_cmake_ninja` なら `cmake` / `ninja` も）を入れる
 2. **workspace**: 共有ワークスペースを用意し、足りないモジュールだけを追加取得する
 3. **ボードの裏取り**: `board.yml` と照合する
 4. **venv（requirements）**: `zephyr/scripts/requirements-base.txt` を入れる（esptool は hal_espressif 同梱版が使われるので入れない。§9）
@@ -192,8 +192,7 @@ version = "auto"                # "auto" なら zephyr/SDK_VERSION に従う
 
 [python]
 version = "3.12"
-installer = "auto"              # "auto"（uv があれば uv）| "uv" | "venv"
-host_tools_via_pip = true       # cmake / ninja を PyPI ホイールで venv に入れる
+install_cmake_ninja = true      # cmake / ninja を PyPI ホイールで project venv に入れる
 extra_requirements = []
 
 [build]
@@ -269,8 +268,7 @@ pub struct Sdk { #[serde(default)] pub version: SdkVersion }   // Auto | Exact(S
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Python {
     pub version: String,
-    pub installer: PyInstaller,                                 // Auto | Uv | Venv
-    pub host_tools_via_pip: bool,
+    pub install_cmake_ninja: bool,
     pub extra_requirements: Vec<String>,
 }
 
@@ -386,7 +384,7 @@ OS 標準のキャッシュディレクトリ（`~/Library/Caches` や `%LOCALAP
 │       ├── zephyr/
 │       └── modules/hal/espressif/  # blobs も含む
 ├── venvs/
-│   ├── py3.12-5e6f7a8b/            # キー = (workspace キー, python, extras, host_tools_via_pip)
+│   ├── py3.12-5e6f7a8b/            # キー = (workspace キー, python, extras, install_cmake_ninja)
 │   └── py3.12-5e6f7a8b-9c0d1e2f/   # zem.lock のパッケージが共有 venv と違う場合だけ作る専用 venv
 ├── sdk/
 │   └── zephyr-sdk-0.17.x/          # ツールチェーンは必要な分だけ追加される
@@ -396,7 +394,6 @@ OS 標準のキャッシュディレクトリ（`~/Library/Caches` や `%LOCALAP
 │   ├── git/                        # 将来用: git ミラー（west の --name-cache は既存キャッシュを読むだけで作らないため、zem が管理する。Phase 4）
 │   ├── downloads/                  # SDK の sha256.sum（アーカイブは展開後に削除）
 │   ├── uv/                         # UV_CACHE_DIR
-│   ├── pip/                        # PIP_CACHE_DIR（venv フォールバック時）
 │   ├── ccache/                     # CCACHE_DIR
 │   └── zephyr/                     # Zephyr の CMake ユーザーキャッシュ（-DUSER_CACHE_DIR）
 ├── westconfig                      # WEST_CONFIG_GLOBAL / SYSTEM の差し替え先（空ファイル）
@@ -482,7 +479,7 @@ manifest:
 
 ### 4.5 venv と SDK の共有
 
-- **venv**: キーは `(workspace キー, python version, extra_requirements, host_tools_via_pip)`。zephyr のリビジョンが同じなら requirements も同じなので、同じ構成のプロジェクト間で 1 つを共有する。
+- **venv**: キーは `(workspace キー, python version, extra_requirements, install_cmake_ninja)`。zephyr のリビジョンが同じなら requirements も同じなので、同じ構成のプロジェクト間で 1 つを共有する。
 - **SDK**: `sdk/zephyr-sdk-<ver>/` を全プロジェクトで共有する。**`west sdk install` は使わず、zem が直接取得する**（§9: GitHub API が 504 で失敗し続けたこと、内部で `setup.sh -c` を必ず実行して `~/.cmake/packages` に登録してしまうこと、の 2 点から）。
   1. `https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v<ver>/sha256.sum` を取得する
   2. `zephyr-sdk-<ver>_<host>_minimal.tar.xz` と `toolchain_<host>_<toolchain>.tar.xz` を `cache/downloads/` に取得し、sha256 を照合する
@@ -517,7 +514,6 @@ manifest:
 | `WEST_CONFIG_GLOBAL` / `WEST_CONFIG_SYSTEM` | `<ZEM_HOME>/westconfig` |
 | `PYTHONNOUSERSITE` | `1` |
 | `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` | `<ZEM_HOME>/cache/uv` / `<ZEM_HOME>/python` |
-| `PIP_CACHE_DIR` | `<ZEM_HOME>/cache/pip` |
 | `CCACHE_DIR` | `<ZEM_HOME>/cache/ccache` |
 | `ZEM_ACTIVE` | `1`（入れ子実行の検出とプロンプト表示用） |
 
@@ -564,8 +560,8 @@ manifest:
 6. `board/`: 修飾子パーサ、静的テーブル、`ResolvedTarget`
 7. `cli/init.rs`: 引数（`--name --board --zephyr-version --yes`）と対話モード。`.gitignore` に `build/` を追記
 8. `tools/`、`doctor/`
-   - 必須: `git`、`uv` または `python3>=3.10`
-   - `host_tools_via_pip = false` の場合のみ必須: `cmake>=3.20.5`、`ninja`
+   - 必須: `git`（uv と Python は zem が管理するため、ホストに無くてよい）
+   - `install_cmake_ninja = false` の場合のみ必須: `cmake>=3.20.5`、`ninja`
    - 推奨: `dtc`（OS ごとの導入コマンドを案内）
    - Linux のみ: シリアルデバイスへの権限（`dialout` / `uucp` グループ）
    - 衝突警告: `IDF_PATH` などが設定されていれば「zem 実行時には除外される」と表示
@@ -592,9 +588,10 @@ manifest:
 **タスク**
 1. `store/mod.rs`（完了マーカー、ロック）、`fsutil.rs`（アトミック書き込み）、`sync/plan.rs`（`--dry-run` で「何を作るか・何を再利用するか」を表示）
 2. `store/venv.rs`
-   - uv がある場合: `uv venv <path> --python <ver> --python-preference only-managed` → `uv pip install --python <venv の python> west [cmake ninja]`（スパイクでは、指定しないとホストの Python 3.12.7 が使われた。再現性のため uv 管理の Python に固定する）
-   - uv がない場合: `python3 -m venv` + `pip`
-   - ワークスペース準備後に `requirements-base.txt` を入れる（2 段階）
+   - uv は zem が固定版（`UV_VERSION`）を取得して使う。ホストの uv / python は使わない
+   - venv は常に `uv venv <path> --python <ver> --python-preference only-managed --no-project` で作り、`uv pip install --python <venv の python>` で入れる（スパイクでは、指定しないとホストの Python 3.12.7 が使われた。再現性のため uv 管理の Python に固定する）
+   - 共有の west venv（`tools/west`）には `west` だけを入れる。project venv はワークスペース準備後に作り、`requirements-base.txt` と `cmake` / `ninja`（`install_cmake_ninja`）と extras を入れる
+   - venv は最終パスで組み立て、marker を最後に書いて公開する。staging してから rename はしない（uv / pip が書く実行スクリプトの shebang に venv の絶対パスが入り、移動後は `bad interpreter` になるため。実機で確認した）
 3. `manifest/`: feature → プロジェクト名、和集合での west.yml 生成
 4. `store/workspace.rs`: 初回は `west init -l` + `west update --narrow -o=--depth=1`、モジュール追加時は west.yml を再生成して引数なしの `west update` を実行する
 5. ボードの裏取り（`board_yml.rs`）
@@ -672,14 +669,14 @@ manifest:
 
 **実装結果（2026-11-25、macOS arm64。タスク 1・2・4 の monitor）**
 - **`zem monitor [--port] [--baud] [--no-decode] [-- <idf_monitor 引数>]` と `zem flash --monitor`**: `west espressif monitor` はビルドディレクトリを自分で探すため使わず、hal_espressif の `tools/idf_monitor/idf_monitor.py` を venv の Python で直接起動する。`--toolchain-prefix` に zem の SDK を渡すので、バックトレースのアドレスがソース行に変換される。ポートは `[flash].port`、なければ hal 同梱の esptool で ESP デバイスを自動検出する。実機（ESP32）で自動検出・リセット後のブートログ・Ctrl+] での終了（終了コード 0）を確認した
-- **`zem.lock`**: sync のたびに生成・更新する。中身は `[zephyr]`（url・revision・commit）、`[modules]`（このプロジェクトのモジュールの SHA。`west list -f "{name} {sha}"`）、`[sdk].version`、`[python]`（version・host-tools-via-pip・extra-requirements・`packages`＝インストール後の freeze 結果）
+- **`zem.lock`**: sync のたびに生成・更新する。中身は `[zephyr]`（url・revision・commit）、`[modules]`（このプロジェクトのモジュールの SHA。`west list -f "{name} {sha}"`）、`[sdk].version`、`[python]`（version・install-cmake-ninja・extra-requirements・`packages`＝インストール後の freeze 結果）
   - lock の各節は、zem.toml の対応する設定が変わっていなければ適用する（例: `[python].extra_requirements` を変えると Python の固定だけ外れる）
   - 不一致の扱い: 通常の sync は警告して lock を更新する。`zem sync --locked` は lock が無い・古い・結果が一致しない場合にエラーで止まり、lock を書き換えない（CI 向け）。`--update` は lock を無視して取り直す（`--locked` とは併用不可）
   - **ブランチ指定**: sync 時に `git ls-remote` でコミットを解決し、ワークスペースのキーを SHA にする（共有ワークスペースが動くブランチを追従しない）。以降は lock のコミットを使い、`--update` で最新に進める
   - **Python パッケージ**: lock の `packages` を制約ファイル（`.zem/constraints.txt`、`pip install -c`）として渡す。共有 venv が別のバージョンで入っている場合は、`<venv キー>-<パッケージのハッシュ 8 桁>` の専用 venv を作り、他プロジェクトの venv を書き換えない
   - 計画からの変更: `uv pip compile` ではなく、インストール後の freeze を記録する（Zephyr の requirements には範囲指定しかなく、実際に入ったものを固定するほうが確実なため）
 - **`zem cache list` / `zem cache gc [--dry-run]`**: 参照元は台帳（`projects.json`）の各プロジェクトの `.zem/state.json`。読めなければ台帳の記録で代用し、その SDK のツールチェーンはすべて残す。`zem.toml` が消えたプロジェクトは台帳から外す
-  - 削除対象: 未参照のワークスペース・venv・SDK（バージョンごと）・ツールチェーン、1 時間以上前の `.zem-extract-*`、`trash/` の残骸。uv の Python 本体と `cache/` は表示のみで消さない
+  - 削除対象: 未参照のワークスペース・venv・SDK（バージョンごと）・ツールチェーン、1 時間以上前の `.zem-staging-*`（ロックが空いているもの）、`trash/` の残骸。uv の Python 本体と `cache/` は表示のみで消さない
   - 安全策: gc の間は台帳のロックを保持する（sync が新しい参照を登録できない）。各 Store は `try_lock` で取れなければ「使用中」として飛ばす。削除は `trash/` へ rename してから行う
   - 実測: E2E 用 ZEM_HOME（2.5 GiB）で lock の検証時に作った専用 venv 2 個（280 MiB）を削除。SDK のロックを別プロセスで保持した状態では、未使用の esp32s3 ツールチェーンが「使用中」として残ることを確認した。`cache list` は 2.6 秒（ワークスペースの走査が大半）
 
@@ -813,7 +810,7 @@ pub fn serial_port_hint() -> &'static str;             // "/dev/ttyUSB0" / "/dev
 | Zephyr の対応範囲 | v4.0 以降。`init` の既定値と初期の検証対象は v4.2.0 |
 | SDK の取得方法 | `west sdk install` は使わず、リリースアセットを直接取得し sha256 を照合する（§4.5、§9） |
 | esptool | pip では入れない。hal_espressif 同梱版を Zephyr が使う |
-| cmake / ninja の入手 | 既定は PyPI ホイールを venv に入れる（`host_tools_via_pip = false` でホスト版を使用） |
+| cmake / ninja の入手 | 既定は PyPI ホイールを venv に入れる（`install_cmake_ninja = false` でホスト版を使用） |
 | 環境変数の分離 | 既定は denylist 方式。strict（allowlist）は Phase 4 で実装済み（zem が起動するコマンドのみ。`zem env` は常に denylist） |
 
 ### 残りの論点
@@ -839,7 +836,7 @@ pub fn serial_port_hint() -> &'static str;             // "/dev/ttyUSB0" / "/dev
 | SDK の直接取得 | ✅ `sha256.sum` で照合して展開。minimal 5 KB + esp32s3 ツールチェーン 36 MB、展開後 193 MB、約 3 秒 | `store/sdk.rs` で実装 |
 | `west blobs fetch hal_espressif` | ✅ ライセンスのクリックスルーなし（stdin を閉じても成功）。全 SoC 分の blobs を取得（35 MB、57 秒）。同意が必要なモジュール向けに `-a/--auto-accept` がある | `accept_licenses = true` の場合だけ `-a` を付ける |
 | esptool | ℹ️ どの `requirements-*.txt` にも含まれない。ビルドも `west flash` も `<hal_espressif>/tools/esptool_py/esptool.py`（v4.8.1）を使う | pip では入れない |
-| PyPI 版 cmake / ninja | ✅ cmake 4.4.5 / ninja 1.13.2 で v4.2.0 のビルドが成功 | `host_tools_via_pip = true` を既定のまま維持 |
+| PyPI 版 cmake / ninja | ✅ cmake 4.4.5 / ninja 1.13.2 で v4.2.0 のビルドが成功 | `install_cmake_ninja = true` を既定のまま維持 |
 | uv の Python | ⚠️ `--python 3.12` だけだとホストの Python 3.12.7 が使われた | `--python-preference only-managed` を付ける |
 | 汚染環境でのビルド | ✅ 実際の `IDF_PATH`（`~/.espressif/v6.1/esp-idf`）と偽の `xtensa-esp32s3-elf-gcc` が PATH にあっても、zem の SDK のコンパイラが使われた。ただし venv を PATH の先頭に置かないと偽の `cmake` が拾われて失敗した | venv を PATH の先頭に置く設計を維持 |
 | 古い CMake レジストリ | ℹ️ ユーザー環境に、存在しない `~/zephyr-sdk-1.0.1` を指す `Zephyr-sdk` の登録が残っていた。`ZEPHYR_SDK_INSTALL_DIR` の指定が優先され、影響はなかった | `-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF` も念のため維持 |

@@ -49,10 +49,10 @@ zem tries to solve these with the following principles:
 
 - macOS or Linux
 - git
-- [uv](https://docs.astral.sh/uv/) (recommended; zem then provisions Python itself through uv) or Python 3.10+
 - Rust 1.89+ to build zem
 
-cmake and ninja are installed into the venv via pip by default, so they are not required on the host. `dtc` is recommended.
+zem downloads the uv it uses (pinned, checked against its SHA-256) and lets uv provide Python, so neither a host uv nor a host Python is needed.
+cmake and ninja are installed into the project venv by default (`[python].install_cmake_ninja`). `dtc` is recommended.
 Run `zem doctor` to see what is missing.
 
 ## Installation
@@ -138,10 +138,10 @@ zem sync
 
 Sync runs seven steps. When nothing has changed, subsequent runs finish in under a second.
 
-1. Python environment (create a venv with uv and install west)
+1. Python environment (download the pinned uv, create the shared west venv)
 2. Zephyr workspace (`west init` / `west update`, shallow-fetching only the required modules)
 3. Board check (against Zephyr's `board.yml` / `soc.yml`)
-4. Zephyr's Python requirements
+4. Zephyr's Python requirements (the project venv, built once the workspace exists)
 5. Zephyr SDK (the version that Zephyr requires, with only the needed toolchains)
 6. Binary blobs (`west blobs fetch`)
 7. Project state (`.zem/state.json`, `zem.lock`)
@@ -227,11 +227,12 @@ The project's `.zem/` holds only lightweight files and is git-ignored.
 
 ```
 ~/.zem/
+├── tools/        # the pinned uv and the shared west venv
 ├── workspaces/   # Zephyr + modules (per Zephyr revision, shared across projects)
-├── venvs/        # Python environments
+├── venvs/        # project Python environments (built once, never modified)
 ├── sdk/          # Zephyr SDK (only the toolchains you need)
 ├── python/       # Python interpreters managed by uv
-└── cache/        # uv / pip / ccache caches
+└── cache/        # downloads, uv / git / ccache caches
 ```
 
 ```sh
@@ -246,7 +247,7 @@ Deleting `~/.zem` removes everything zem has created.
 By default, commands launched by zem do not receive:
 
 - ESP-IDF variables (`IDF_PATH`, ...), other Zephyr variables (`ZEPHYR_*`), Python environment variables
-  (`VIRTUAL_ENV`, `CONDA_*`, `PYTHONPATH`, `PIP_*`, ...)
+  (`VIRTUAL_ENV`, `CONDA_*`, `PYTHONPATH`, `PIP_*`, `UV_*`, ...)
 - `PATH` entries for `.espressif`, `esp-idf`, `zephyr-sdk-*`, and other venv / conda `bin` directories
 
 For stricter isolation, there is a mode that passes only allowlisted variables:

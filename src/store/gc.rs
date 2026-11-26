@@ -10,15 +10,18 @@ use std::time::{Duration, SystemTime};
 
 use super::registry::{self, Registry};
 use super::sdk;
+use super::{STAGING_LOCK_FILE, STAGING_PREFIX};
 use crate::config::CONFIG_FILE_NAME;
 use crate::error::{Result, ZemError};
 use crate::fsutil;
 use crate::home::ZemHome;
+use crate::lock::FileLock;
 use crate::project::{PROJECT_STATE_DIR, ProjectState, STATE_FILE};
 
 const SDK_DIR_PREFIX: &str = "zephyr-sdk-";
-const EXTRACT_PREFIX: &str = ".zem-extract-";
-/// Extraction directories younger than this may belong to a sync that is still running.
+/// Staging prefix used by older zem versions during SDK extraction.
+const LEGACY_EXTRACT_PREFIX: &str = ".zem-extract-";
+/// Staging directories younger than this may belong to a sync that is still running.
 const LEFTOVER_AGE: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -63,7 +66,7 @@ impl Store {
 #[derive(Debug, Default)]
 pub struct Usage {
     pub stores: Vec<Store>,
-    /// Shared directories gc never touches (uv-managed Python, download caches, ...).
+    /// Shared directories gc never touches (uv and west venvs, uv-managed Python, caches).
     pub shared: Vec<(String, u64)>,
     pub projects: Vec<PathBuf>,
     /// Registry entries whose project no longer exists.
@@ -157,6 +160,16 @@ fn is_old(path: &Path) -> bool {
         .is_some_and(|age| age >= LEFTOVER_AGE)
 }
 
+/// Staging directories of `dir` that an interrupted run left behind. Only the old ones are
+/// reported; collect still skips any whose lock another process holds.
+fn staging_leftovers(dir: &Path, label: &str) -> Vec<Store> {
+    subdirs(dir)
+        .into_iter()
+        .filter(|(name, path)| name.starts_with(STAGING_PREFIX) && is_old(path))
+        .map(|(name, path)| leftover(format!("{label}/{name}"), path, None))
+        .collect()
+}
+
 fn leftover(name: String, path: PathBuf, lock: Option<String>) -> Store {
     Store {
         kind: Kind::Leftover,
@@ -191,8 +204,13 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
         }
     }
 
+    stores.extend(staging_leftovers(&home.sdk_dir(), "sdk"));
+    stores.extend(staging_leftovers(&home.tools_dir().join("uv"), "uv"));
     for (name, path) in subdirs(&home.sdk_dir()) {
-        if name.starts_with(EXTRACT_PREFIX) {
+        if name.starts_with(STAGING_PREFIX) {
+            continue;
+        }
+        if name.starts_with(LEGACY_EXTRACT_PREFIX) {
             if is_old(&path) {
                 stores.push(leftover(format!("sdk/{name}"), path, None));
             }
@@ -204,7 +222,13 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
         let lock = Some(format!("sdk-{version}"));
         let mut toolchain_size = 0;
         for (tc, tc_path) in subdirs(&path) {
-            if tc.starts_with(EXTRACT_PREFIX) {
+            if tc.starts_with(STAGING_PREFIX) {
+                if is_old(&tc_path) {
+                    stores.push(leftover(format!("{name}/{tc}"), tc_path, None));
+                }
+                continue;
+            }
+            if tc.starts_with(LEGACY_EXTRACT_PREFIX) {
                 if is_old(&tc_path) {
                     stores.push(leftover(format!("{name}/{tc}"), tc_path, lock.clone()));
                 }
@@ -250,7 +274,11 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
 }
 
 fn shared(home: &ZemHome) -> Vec<(String, u64)> {
-    let mut dirs = vec![("python".to_string(), home.python_dir())];
+    let mut dirs = vec![
+        ("python".to_string(), home.python_dir()),
+        ("tools/uv".to_string(), home.tools_dir().join("uv")),
+        ("tools/west".to_string(), home.tools_dir().join("west")),
+    ];
     dirs.extend(
         subdirs(&home.cache_dir())
             .into_iter()
@@ -329,6 +357,15 @@ pub fn collect(home: &ZemHome, dry_run: bool) -> Result<GcReport> {
                     continue;
                 }
             },
+            None if is_staging(home, &store.path) => {
+                match FileLock::try_exclusive(&store.path.join(STAGING_LOCK_FILE))? {
+                    Some(guard) => Some(guard),
+                    None => {
+                        report.busy.push(store);
+                        continue;
+                    }
+                }
+            }
             None => None,
         };
         if !dry_run {
@@ -340,9 +377,17 @@ pub fn collect(home: &ZemHome, dry_run: bool) -> Result<GcReport> {
     Ok(report)
 }
 
+/// A staging directory outside the trash, whose producer may still hold its lock.
+fn is_staging(home: &ZemHome, path: &Path) -> bool {
+    !path.starts_with(home.trash_dir())
+        && path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(STAGING_PREFIX))
+}
+
 /// Move `path` into the trash first, so an interrupted delete never leaves a half-removed
 /// store behind under its original name.
-fn discard(home: &ZemHome, path: &Path) -> Result<()> {
+pub fn discard(home: &ZemHome, path: &Path) -> Result<()> {
     let trash = home.trash_dir();
     if path.starts_with(&trash) {
         return fsutil::remove_dir_all_if_exists(path);
