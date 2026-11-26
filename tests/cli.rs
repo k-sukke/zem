@@ -237,7 +237,8 @@ fn sync_ignores_host_uv_and_fails_cleanly_when_it_cannot_download() {
     let fake_uv = bin.path().join("uv");
     fs::write(
         &fake_uv,
-        format!("#!/bin/sh\ntouch '{}'\nexit 0\n", ran.display()),
+        // `: >` is a shell builtin; the child PATH holds only git and uv, so no `touch`.
+        format!("#!/bin/sh\n: > '{}'\nexit 0\n", ran.display()),
     )
     .unwrap();
     fs::set_permissions(&fake_uv, fs::Permissions::from_mode(0o755)).unwrap();
