@@ -74,7 +74,7 @@ impl Session {
     }
 
     pub fn west(&self) -> PathBuf {
-        venv_west(&self.state.venv.path)
+        platform::venv_exe(&self.state.venv.path, "west")
     }
 
     pub fn build_dir(&self) -> PathBuf {
@@ -128,10 +128,6 @@ impl Session {
     }
 }
 
-pub fn venv_west(venv: &Path) -> PathBuf {
-    platform::venv_bin_dir(venv).join(platform::exe_name("west"))
-}
-
 pub fn check(state: &ProjectState, loaded: &LoadedConfig, home: &ZemHome) -> Result<()> {
     let stale = |reason: String| Err(ZemError::NotSynced { reason });
     if state.schema != STATE_SCHEMA {
@@ -153,7 +149,7 @@ pub fn check(state: &ProjectState, loaded: &LoadedConfig, home: &ZemHome) -> Res
     let mut required = vec![
         state.zephyr_base.clone(),
         platform::venv_python(&state.venv.path),
-        venv_west(&state.venv.path),
+        platform::venv_exe(&state.venv.path, "west"),
     ];
     required.extend(state.modules.values().cloned());
     required.extend(

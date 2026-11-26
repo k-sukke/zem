@@ -92,8 +92,13 @@ pub fn venv_bin_dir(venv: &Path) -> PathBuf {
     venv.join(imp::VENV_BIN_DIR)
 }
 
+/// An executable installed into the venv, e.g. `west`.
+pub fn venv_exe(venv: &Path, base: &str) -> PathBuf {
+    venv_bin_dir(venv).join(exe_name(base))
+}
+
 pub fn venv_python(venv: &Path) -> PathBuf {
-    venv_bin_dir(venv).join(exe_name("python"))
+    venv_exe(venv, "python")
 }
 
 /// Environment variable names are case-insensitive on Windows (`Path` == `PATH`).

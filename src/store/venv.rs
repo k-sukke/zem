@@ -17,27 +17,25 @@ use crate::process::Runner;
 /// Zephyr's base requirements, relative to the zephyr checkout.
 pub const REQUIREMENTS_BASE: &str = "scripts/requirements-base.txt";
 
+/// The python version and bootstrap packages are part of the venv key, so the marker only
+/// records what was installed into it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VenvMarker {
     pub schema: u32,
-    pub installer: String,
-    pub python: String,
-    pub bootstrap: Vec<String>,
     #[serde(default)]
     pub requirements_sha256: Option<String>,
-    /// `pip freeze` after the last install, as recorded in `zem.lock`.
-    #[serde(default)]
-    pub packages: Option<Vec<String>>,
+    /// `uv pip freeze` after the last install, as recorded in `zem.lock`.
+    pub packages: Vec<String>,
 }
 
-/// The frozen packages recorded for an existing venv, whichever installer wrote the marker.
-///
-/// Unlike [`VenvStore::marker`], this does not require `installer == "uv"`: bootstrap rebuilds
-/// non-uv venvs, but venv selection still needs their package metadata to avoid sharing one.
+fn read_venv_marker(dir: &Path) -> Option<VenvMarker> {
+    read_marker::<VenvMarker>(dir).filter(|m| m.schema == MARKER_SCHEMA)
+}
+
+/// The frozen packages recorded for an existing venv, even if its interpreter is gone, so venv
+/// selection never shares a venv that belongs to a different package set.
 pub fn installed_packages(dir: &Path) -> Option<Vec<String>> {
-    read_marker::<VenvMarker>(dir)
-        .filter(|m| m.schema == MARKER_SCHEMA)
-        .and_then(|m| m.packages)
+    read_venv_marker(dir).map(|m| m.packages)
 }
 
 pub fn bootstrap_packages(cfg: &Python) -> Vec<String> {
@@ -66,35 +64,24 @@ impl VenvStore<'_> {
     }
 
     pub fn west(&self) -> PathBuf {
-        platform::venv_bin_dir(self.dir).join(platform::exe_name("west"))
+        platform::venv_exe(self.dir, "west")
     }
 
     fn marker(&self) -> Option<VenvMarker> {
-        read_marker::<VenvMarker>(self.dir)
-            .filter(|m| m.schema == MARKER_SCHEMA && m.installer == "uv" && self.python().is_file())
+        read_venv_marker(self.dir).filter(|_| self.python().is_file())
     }
 
     /// Create the venv with just enough to run `west` (before a workspace exists).
     pub fn ensure_bootstrap(&self, uv: &Path, pins: Option<(&[String], &Path)>) -> Result<Outcome> {
-        let packages = bootstrap_packages(self.cfg);
-        if self.marker().is_some_and(|m| {
-            m.bootstrap == packages
-                && m.python == self.cfg.version
-                && m.packages.is_some()
-                && pins.is_none_or(|(locked, _)| m.packages.as_deref() == Some(locked))
-        }) && self.west().is_file()
+        if self
+            .marker()
+            .is_some_and(|m| pins.is_none_or(|(locked, _)| m.packages == locked))
+            && self.west().is_file()
         {
             return Ok(Outcome::Reused);
         }
 
-        let previous_packages = installed_packages(self.dir).or_else(|| {
-            self.python()
-                .is_file()
-                .then(|| self.freeze_at(self.dir, uv).ok())
-                .flatten()
-                .filter(|pkgs| !pkgs.is_empty())
-        });
-
+        let previous_packages = installed_packages(self.dir);
         let parent = self.dir.parent().ok_or_else(|| ZemError::CorruptState {
             path: self.dir.to_path_buf(),
             message: "venv path has no parent directory".to_string(),
@@ -106,7 +93,7 @@ impl VenvStore<'_> {
             .map_err(ZemError::io(parent))?;
         let staged_venv = staged.path().join("venv");
 
-        let mut cmd = self.command_at(&staged_venv, uv);
+        let mut cmd = self.env.command(uv);
         cmd.arg("venv")
             .arg(&staged_venv)
             .args(["--python", &self.cfg.version])
@@ -120,14 +107,11 @@ impl VenvStore<'_> {
         self.pip_install_at(
             &staged_venv,
             uv,
-            &packages,
+            &bootstrap_packages(self.cfg),
             None,
             pins.map(|(_, constraints)| constraints),
         )?;
-        if !platform::venv_bin_dir(&staged_venv)
-            .join(platform::exe_name("west"))
-            .is_file()
-        {
+        if !platform::venv_exe(&staged_venv, "west").is_file() {
             return Err(ZemError::CorruptState {
                 path: staged_venv,
                 message: "bootstrap install completed without producing `west`".to_string(),
@@ -145,11 +129,8 @@ impl VenvStore<'_> {
             &staged_venv,
             &VenvMarker {
                 schema: MARKER_SCHEMA,
-                installer: "uv".to_string(),
-                python: self.cfg.version.clone(),
-                bootstrap: packages,
                 requirements_sha256: None,
-                packages: Some(recorded_packages),
+                packages: recorded_packages,
             },
         )?;
         replace_dir(&staged_venv, self.dir, &staged.path().join("previous"))?;
@@ -172,10 +153,9 @@ impl VenvStore<'_> {
             message: "venv marker disappeared during sync".to_string(),
         })?;
         if marker.requirements_sha256.as_deref() == Some(digest.as_str())
-            && let Some(packages) = &marker.packages
-            && pins.is_none_or(|(pins, _)| pins == packages.as_slice())
+            && pins.is_none_or(|(pins, _)| pins == marker.packages.as_slice())
         {
-            return Ok((Outcome::Reused, packages.clone()));
+            return Ok((Outcome::Reused, marker.packages));
         }
 
         let installed = self
@@ -190,36 +170,21 @@ impl VenvStore<'_> {
         let packages = match installed {
             Ok(packages) => packages,
             Err(err) => {
-                let had_sha = marker.requirements_sha256.take().is_some();
-                if marker.packages.is_none() {
-                    marker.packages = self
-                        .freeze_at(self.dir, uv)
-                        .ok()
-                        .filter(|pkgs| !pkgs.is_empty());
-                }
-                if had_sha && marker.packages.is_some() {
+                if marker.requirements_sha256.take().is_some() {
                     let _ = write_marker(self.dir, &marker);
                 }
                 return Err(err);
             }
         };
         marker.requirements_sha256 = Some(digest);
-        marker.packages = Some(packages.clone());
+        marker.packages = packages.clone();
         write_marker(self.dir, &marker)?;
         Ok((Outcome::Created, packages))
     }
 
-    fn command_at(&self, venv_dir: &Path, uv: &Path) -> std::process::Command {
-        let mut cmd = self.env.command(uv);
-        if venv_dir != self.dir {
-            cmd.env("VIRTUAL_ENV", venv_dir);
-        }
-        cmd
-    }
-
     fn freeze_at(&self, venv_dir: &Path, uv: &Path) -> Result<Vec<String>> {
         let python = platform::venv_python(venv_dir);
-        let mut cmd = self.command_at(venv_dir, uv);
+        let mut cmd = self.env.command(uv);
         cmd.args(["pip", "freeze", "--python"]).arg(&python);
         Ok(lockfile::parse_freeze(&self.runner.output(&mut cmd)?))
     }
@@ -233,7 +198,7 @@ impl VenvStore<'_> {
         constraints: Option<&Path>,
     ) -> Result<()> {
         let python = platform::venv_python(venv_dir);
-        let mut cmd = self.command_at(venv_dir, uv);
+        let mut cmd = self.env.command(uv);
         cmd.args(["pip", "install", "--python"]).arg(&python);
         if let Some(req) = requirements {
             cmd.arg("-r").arg(req);
@@ -299,25 +264,19 @@ mod tests {
     }
 
     #[test]
-    fn installed_packages_ignores_installer_but_checks_schema() {
+    fn installed_packages_checks_schema() {
         let tmp = tempfile::tempdir().unwrap();
         let packages = vec!["west==1.4.0".to_string()];
-        let marker = |schema: u32, installer: &str| VenvMarker {
+        let marker = |schema: u32| VenvMarker {
             schema,
-            installer: installer.to_string(),
-            python: "3.12".to_string(),
-            bootstrap: vec!["west".to_string()],
             requirements_sha256: Some("abc".to_string()),
-            packages: Some(packages.clone()),
+            packages: packages.clone(),
         };
 
-        write_marker(tmp.path(), &marker(MARKER_SCHEMA, "venv")).unwrap();
+        write_marker(tmp.path(), &marker(MARKER_SCHEMA)).unwrap();
         assert_eq!(installed_packages(tmp.path()), Some(packages.clone()));
 
-        write_marker(tmp.path(), &marker(MARKER_SCHEMA, "uv")).unwrap();
-        assert_eq!(installed_packages(tmp.path()), Some(packages.clone()));
-
-        write_marker(tmp.path(), &marker(MARKER_SCHEMA + 1, "uv")).unwrap();
+        write_marker(tmp.path(), &marker(MARKER_SCHEMA + 1)).unwrap();
         assert_eq!(installed_packages(tmp.path()), None);
     }
 

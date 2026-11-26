@@ -766,9 +766,7 @@ mod venv_rebuild {
     use zem::env::EnvBuilder;
     use zem::home::ZemHome;
     use zem::process::Runner;
-    use zem::store::venv::{
-        REQUIREMENTS_BASE, VenvMarker, VenvStore, bootstrap_packages, installed_packages,
-    };
+    use zem::store::venv::{REQUIREMENTS_BASE, VenvMarker, VenvStore, installed_packages};
     use zem::store::{MARKER_SCHEMA, read_marker, write_marker};
     use zem::sync;
 
@@ -843,7 +841,7 @@ esac
         path
     }
 
-    fn seed_working_venv(dir: &Path, installer: &str, packages: &[String]) {
+    fn seed_working_venv(dir: &Path, packages: &[String]) {
         write_exec(&dir.join("bin/python"), "#!/bin/sh\necho old-python\n");
         write_exec(&dir.join("bin/west"), "#!/bin/sh\necho old-west\n");
         fs::write(dir.join("keep.txt"), "working").unwrap();
@@ -851,58 +849,59 @@ esac
             dir,
             &VenvMarker {
                 schema: MARKER_SCHEMA,
-                installer: installer.to_string(),
-                python: "3.12".to_string(),
-                bootstrap: vec!["west".to_string()],
                 requirements_sha256: Some("old-sha".to_string()),
-                packages: Some(packages.to_vec()),
+                packages: packages.to_vec(),
             },
         )
         .unwrap();
     }
 
     #[test]
-    fn failed_bootstrap_preserves_existing_environment_for_all_installers() {
+    fn failed_bootstrap_preserves_existing_environment() {
         let tmp = tempfile::tempdir().unwrap();
         let uv = fake_uv(tmp.path());
         let runner = Runner::new(None, false).unwrap();
-        let cfg = Python::default(); // host_tools_via_pip = true -> triggers rebuild over ["west"]
+        let cfg = Python::default();
+        let new_pkgs = vec!["west==1.5.0".to_string()];
+        let constraints = tmp.path().join("constraints.txt");
+        fs::write(&constraints, "west==1.5.0\n").unwrap();
 
-        for installer in ["venv", "uv"] {
-            for fail_step in ["venv", "install"] {
-                let venvs = tmp.path().join(format!("venvs-{installer}-{fail_step}"));
-                let dir = venvs.join("py3.12-shared");
-                let old_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
-                seed_working_venv(&dir, installer, &old_pkgs);
+        for fail_step in ["venv", "install"] {
+            let venvs = tmp.path().join(format!("venvs-{fail_step}"));
+            let dir = venvs.join("py3.12-shared");
+            let old_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
+            seed_working_venv(&dir, &old_pkgs);
 
-                let env = EnvBuilder::from_vars([
-                    ("PATH", "/usr/bin:/bin"),
-                    ("FAKE_UV_FAIL_STEP", fail_step),
-                ]);
-                let store = VenvStore {
-                    dir: &dir,
-                    cfg: &cfg,
-                    env: &env,
-                    runner: &runner,
-                };
-                assert!(store.ensure_bootstrap(&uv, None).is_err());
+            let env = EnvBuilder::from_vars([
+                ("PATH", "/usr/bin:/bin"),
+                ("FAKE_UV_FAIL_STEP", fail_step),
+            ]);
+            let store = VenvStore {
+                dir: &dir,
+                cfg: &cfg,
+                env: &env,
+                runner: &runner,
+            };
+            assert!(
+                store
+                    .ensure_bootstrap(&uv, Some((&new_pkgs, &constraints)))
+                    .is_err()
+            );
 
-                assert_eq!(fs::read_to_string(dir.join("keep.txt")).unwrap(), "working");
-                assert!(
-                    fs::read_to_string(dir.join("bin/west"))
-                        .unwrap()
-                        .contains("old-west")
-                );
-                let marker = read_marker::<VenvMarker>(&dir).unwrap();
-                assert_eq!(marker.installer, installer);
-                assert_eq!(marker.packages, Some(old_pkgs));
-
-                let entries: Vec<_> = fs::read_dir(&venvs)
+            assert_eq!(fs::read_to_string(dir.join("keep.txt")).unwrap(), "working");
+            assert!(
+                fs::read_to_string(dir.join("bin/west"))
                     .unwrap()
-                    .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-                    .collect();
-                assert_eq!(entries, ["py3.12-shared"], "staging dir must be cleaned up");
-            }
+                    .contains("old-west")
+            );
+            let marker = read_marker::<VenvMarker>(&dir).unwrap();
+            assert_eq!(marker.packages, old_pkgs);
+
+            let entries: Vec<_> = fs::read_dir(&venvs)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(entries, ["py3.12-shared"], "staging dir must be cleaned up");
         }
     }
 
@@ -952,10 +951,12 @@ esac
         plan.select_venv(&home, Some(&other_locked));
         assert_ne!(plan.venv_name, shared_name);
 
-        // 2. Rebuild of an existing venv preserves its previous package record across bootstrap
-        // until `ensure_requirements` replaces it (and keeps it if requirements install fails).
+        // 2. Rebuild of an existing venv (e.g. missing `west`) preserves its previous package
+        // record across bootstrap until `ensure_requirements` replaces it (and keeps it if
+        // requirements install fails).
         let owner_pkgs = vec!["PyYAML==6.0.1".to_string(), "west==1.4.0".to_string()];
-        seed_working_venv(&shared_dir, "venv", &owner_pkgs);
+        seed_working_venv(&shared_dir, &owner_pkgs);
+        fs::remove_file(shared_dir.join("bin/west")).unwrap();
         store.ensure_bootstrap(&uv, None).unwrap();
         assert!(!shared_dir.join("keep.txt").exists(), "venv was replaced");
         assert_eq!(installed_packages(&shared_dir), Some(owner_pkgs.clone()));
@@ -1004,9 +1005,5 @@ esac
             vec!["PyYAML==6.0.2".to_string(), "west==1.5.0".to_string()]
         );
         assert_eq!(installed_packages(&shared_dir), Some(final_pkgs));
-        assert_eq!(
-            bootstrap_packages(&cfg),
-            read_marker::<VenvMarker>(&shared_dir).unwrap().bootstrap
-        );
     }
 }

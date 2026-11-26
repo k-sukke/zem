@@ -506,11 +506,8 @@ mod tests {
             &shared_dir,
             &VenvMarker {
                 schema: MARKER_SCHEMA,
-                installer: "uv".to_string(),
-                python: "3.12".to_string(),
-                bootstrap: vec!["west".to_string()],
                 requirements_sha256: Some("abc".to_string()),
-                packages: Some(vec!["west==1.5.0".to_string()]),
+                packages: vec!["west==1.5.0".to_string()],
             },
         )
         .unwrap();
