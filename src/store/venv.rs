@@ -72,7 +72,14 @@ pub fn build_packages(cfg: &Python) -> Vec<String> {
     if cfg.install_cmake_ninja {
         packages.extend(["cmake".to_string(), "ninja".to_string()]);
     }
-    packages.extend(cfg.extra_requirements.iter().cloned());
+    let mut extras: Vec<String> = cfg
+        .extra_requirements
+        .iter()
+        .map(|r| r.trim().to_string())
+        .collect();
+    extras.sort();
+    extras.dedup();
+    packages.extend(extras);
     packages
 }
 
@@ -312,12 +319,36 @@ mod tests {
     #[test]
     fn build_packages_add_build_tools_then_extras() {
         let mut cfg = Python {
-            extra_requirements: vec!["pytest".to_string()],
+            extra_requirements: vec![
+                " ruff ".to_string(),
+                "pytest".to_string(),
+                "ruff".to_string(),
+            ],
             ..Python::default()
         };
-        assert_eq!(build_packages(&cfg), ["cmake", "ninja", "pytest"]);
+        assert_eq!(build_packages(&cfg), ["cmake", "ninja", "pytest", "ruff"]);
         cfg.install_cmake_ninja = false;
-        assert_eq!(build_packages(&cfg), ["pytest"]);
+        assert_eq!(build_packages(&cfg), ["pytest", "ruff"]);
+    }
+
+    #[test]
+    fn requirements_digest_ignores_extra_order_and_duplicates() {
+        let a = Python {
+            extra_requirements: vec!["ruff".to_string(), "pytest".to_string()],
+            ..Python::default()
+        };
+        let b = Python {
+            extra_requirements: vec![
+                " pytest ".to_string(),
+                "ruff".to_string(),
+                "pytest".to_string(),
+            ],
+            ..Python::default()
+        };
+        assert_eq!(
+            requirements_digest("PyYAML\n", &build_packages(&a)),
+            requirements_digest("PyYAML\n", &build_packages(&b))
+        );
     }
 
     #[test]

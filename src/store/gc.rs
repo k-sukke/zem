@@ -19,6 +19,8 @@ use crate::lock::FileLock;
 use crate::project::{PROJECT_STATE_DIR, ProjectState, STATE_FILE};
 
 const SDK_DIR_PREFIX: &str = "zephyr-sdk-";
+/// Staging prefix used by older zem versions during SDK extraction.
+const LEGACY_EXTRACT_PREFIX: &str = ".zem-extract-";
 /// Staging directories younger than this may belong to a sync that is still running.
 const LEFTOVER_AGE: Duration = Duration::from_secs(60 * 60);
 
@@ -208,6 +210,12 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
         if name.starts_with(STAGING_PREFIX) {
             continue;
         }
+        if name.starts_with(LEGACY_EXTRACT_PREFIX) {
+            if is_old(&path) {
+                stores.push(leftover(format!("sdk/{name}"), path, None));
+            }
+            continue;
+        }
         let Some(version) = name.strip_prefix(SDK_DIR_PREFIX) else {
             continue;
         };
@@ -217,6 +225,12 @@ fn scan(home: &ZemHome, refs: &References) -> Vec<Store> {
             if tc.starts_with(STAGING_PREFIX) {
                 if is_old(&tc_path) {
                     stores.push(leftover(format!("{name}/{tc}"), tc_path, None));
+                }
+                continue;
+            }
+            if tc.starts_with(LEGACY_EXTRACT_PREFIX) {
+                if is_old(&tc_path) {
+                    stores.push(leftover(format!("{name}/{tc}"), tc_path, lock.clone()));
                 }
                 continue;
             }
