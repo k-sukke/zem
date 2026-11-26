@@ -28,10 +28,13 @@ pub struct VenvMarker {
     pub packages: Option<Vec<String>>,
 }
 
-/// The frozen packages of an existing venv, if it was fully installed by uv.
+/// The frozen packages recorded for an existing venv, whichever installer wrote the marker.
+///
+/// Unlike [`VenvStore::marker`], this does not require `installer == "uv"`: bootstrap rebuilds
+/// non-uv venvs, but venv selection still needs their package metadata to avoid sharing one.
 pub fn installed_packages(dir: &Path) -> Option<Vec<String>> {
     read_marker::<VenvMarker>(dir)
-        .filter(|m| m.schema == MARKER_SCHEMA && m.installer == "uv")
+        .filter(|m| m.schema == MARKER_SCHEMA)
         .and_then(|m| m.packages)
 }
 
@@ -202,35 +205,25 @@ mod tests {
     }
 
     #[test]
-    fn non_uv_marker_is_ignored() {
+    fn installed_packages_ignores_installer_but_checks_schema() {
         let tmp = tempfile::tempdir().unwrap();
         let packages = vec!["west==1.4.0".to_string()];
-        write_marker(
-            tmp.path(),
-            &VenvMarker {
-                schema: MARKER_SCHEMA,
-                installer: "venv".to_string(),
-                python: "3.12".to_string(),
-                bootstrap: vec!["west".to_string()],
-                requirements_sha256: Some("abc".to_string()),
-                packages: Some(packages.clone()),
-            },
-        )
-        .unwrap();
-        assert_eq!(installed_packages(tmp.path()), None);
+        let marker = |schema: u32, installer: &str| VenvMarker {
+            schema,
+            installer: installer.to_string(),
+            python: "3.12".to_string(),
+            bootstrap: vec!["west".to_string()],
+            requirements_sha256: Some("abc".to_string()),
+            packages: Some(packages.clone()),
+        };
 
-        write_marker(
-            tmp.path(),
-            &VenvMarker {
-                schema: MARKER_SCHEMA,
-                installer: "uv".to_string(),
-                python: "3.12".to_string(),
-                bootstrap: vec!["west".to_string()],
-                requirements_sha256: Some("abc".to_string()),
-                packages: Some(packages.clone()),
-            },
-        )
-        .unwrap();
-        assert_eq!(installed_packages(tmp.path()), Some(packages));
+        write_marker(tmp.path(), &marker(MARKER_SCHEMA, "venv")).unwrap();
+        assert_eq!(installed_packages(tmp.path()), Some(packages.clone()));
+
+        write_marker(tmp.path(), &marker(MARKER_SCHEMA, "uv")).unwrap();
+        assert_eq!(installed_packages(tmp.path()), Some(packages.clone()));
+
+        write_marker(tmp.path(), &marker(MARKER_SCHEMA + 1, "uv")).unwrap();
+        assert_eq!(installed_packages(tmp.path()), None);
     }
 }
