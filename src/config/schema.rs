@@ -5,8 +5,6 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::Arch;
-
 pub const DEFAULT_ZEPHYR_URL: &str = "https://github.com/zephyrproject-rtos/zephyr";
 pub const DEFAULT_PYTHON_VERSION: &str = "3.12";
 
@@ -53,8 +51,6 @@ fn default_zephyr_url() -> String {
 #[serde(deny_unknown_fields)]
 pub struct Target {
     pub board: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arch: Option<Arch>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]

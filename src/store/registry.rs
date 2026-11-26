@@ -30,8 +30,7 @@ impl Default for Registry {
 pub struct ProjectEntry {
     pub workspace: String,
     pub venv: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sdk: Option<String>,
+    pub sdk: String,
     pub last_sync: u64,
 }
 
@@ -61,7 +60,7 @@ mod tests {
         ProjectEntry {
             workspace: ws.into(),
             venv: "py3.12-x".into(),
-            sdk: None,
+            sdk: "0.17.2".into(),
             last_sync: 1,
         }
     }

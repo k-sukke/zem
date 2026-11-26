@@ -221,7 +221,7 @@ mod tests {
     }
 
     fn check(base: &Path, board: &str) -> Result<(), BoardError> {
-        verify(base, &resolve_static(board, None).unwrap(), "v4.2.0")
+        verify(base, &resolve_static(board).unwrap(), "v4.2.0")
     }
 
     #[test]

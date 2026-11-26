@@ -247,11 +247,7 @@ fn sync_check(plan: &sync::SyncPlan, loaded: &LoadedConfig, home: &ZemHome) -> C
         Ok(Some(state)) => Check::new(
             Status::Ok,
             "sync",
-            format!(
-                "ready ({} / SDK {})",
-                state.workspace.key,
-                state.sdk.map(|s| s.key).unwrap_or_default()
-            ),
+            format!("ready ({} / SDK {})", state.workspace.key, state.sdk.key),
         ),
         Ok(None) => Check::new(Status::Info, "sync", "not synced yet").hint(Some("run `zem sync`")),
         Err(err) => Check::new(Status::Warn, "sync", err.to_string())

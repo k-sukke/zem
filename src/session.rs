@@ -66,7 +66,7 @@ impl Session {
                 home: &self.home,
                 venv_dir: &self.state.venv.path,
                 zephyr_base: Some(&self.state.zephyr_base),
-                sdk_dir: self.state.sdk.as_ref().map(|s| s.path.as_path()),
+                sdk_dir: Some(&self.state.sdk.path),
                 west_config: Some(&self.west_config_path()),
             },
             &config,
@@ -143,9 +143,6 @@ pub fn check(state: &ProjectState, loaded: &LoadedConfig, home: &ZemHome) -> Res
             home.root().display()
         ));
     }
-    let Some(sdk) = &state.sdk else {
-        return stale("the Zephyr SDK is not installed".into());
-    };
     let mut required = vec![
         state.zephyr_base.clone(),
         platform::venv_python(&state.venv.path),
@@ -157,7 +154,7 @@ pub fn check(state: &ProjectState, loaded: &LoadedConfig, home: &ZemHome) -> Res
             .target
             .toolchains
             .iter()
-            .map(|tc| sdk::toolchain_gcc(&sdk.path, tc)),
+            .map(|tc| sdk::toolchain_gcc(&state.sdk.path, tc)),
     );
     match required.iter().find(|p| !p.exists()) {
         Some(missing) => stale(format!("{} is missing", missing.display())),

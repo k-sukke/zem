@@ -190,7 +190,6 @@ fn projects_share_one_workspace_and_modules_are_additive() {
             .join("modules/hal/espressif/zephyr/blobs")
             .exists()
     );
-    assert_eq!(state_a["target"]["source"], "board_yml");
     assert!(
         PathBuf::from(state_a["zephyr_base"].as_str().unwrap())
             .join("VERSION")

@@ -113,23 +113,19 @@ fn references(home: &ZemHome, registry: &Registry) -> (References, Vec<PathBuf>,
             Some(state) => {
                 add(&mut refs.workspaces, &state.workspace.key);
                 add(&mut refs.venvs, &state.venv.key);
-                if let Some(sdk) = &state.sdk {
-                    add(&mut refs.sdks, &sdk.key);
-                    for tc in &state.target.toolchains {
-                        refs.toolchains
-                            .entry((sdk.key.clone(), tc.clone()))
-                            .or_default()
-                            .push(root.clone());
-                    }
+                add(&mut refs.sdks, &state.sdk.key);
+                for tc in &state.target.toolchains {
+                    refs.toolchains
+                        .entry((state.sdk.key.clone(), tc.clone()))
+                        .or_default()
+                        .push(root.clone());
                 }
             }
             None => {
                 add(&mut refs.workspaces, &entry.workspace);
                 add(&mut refs.venvs, &entry.venv);
-                if let Some(sdk) = &entry.sdk {
-                    add(&mut refs.sdks, sdk);
-                    refs.whole_sdks.insert(sdk.clone());
-                }
+                add(&mut refs.sdks, &entry.sdk);
+                refs.whole_sdks.insert(entry.sdk.clone());
             }
         }
         live.push(root);
@@ -384,7 +380,7 @@ fn discard(home: &ZemHome, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::{Arch, ResolutionSource};
+    use crate::board::Arch;
     use crate::project::{STATE_SCHEMA, StoreRef, TargetState};
     use crate::store::registry::ProjectEntry;
 
@@ -445,13 +441,12 @@ mod tests {
                 soc: "esp32c3".into(),
                 arch: Arch::Riscv,
                 toolchains: vec![toolchain.into()],
-                source: ResolutionSource::BoardYml,
             },
             workspace: store("ws-a"),
             zephyr_base: PathBuf::new(),
             modules: BTreeMap::new(),
             venv: store("py-a"),
-            sdk: Some(store("0.17.2")),
+            sdk: store("0.17.2"),
             synced_at: 0,
         };
         fsutil::write_json(&root.join(PROJECT_STATE_DIR).join(STATE_FILE), &state).unwrap();
@@ -461,7 +456,7 @@ mod tests {
             ProjectEntry {
                 workspace: "ws-a".into(),
                 venv: "py-a".into(),
-                sdk: Some("0.17.2".into()),
+                sdk: "0.17.2".into(),
                 last_sync: 0,
             },
         )

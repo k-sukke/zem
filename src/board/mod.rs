@@ -91,15 +91,4 @@ pub enum BoardError {
     #[error("`{board}` is not a valid build target")]
     #[diagnostic(code(zem::board::invalid_target), help("valid targets: {valid}"))]
     InvalidTarget { board: String, valid: String },
-
-    #[error("[target].arch = \"{requested}\" conflicts with SoC {soc}, which is {actual}")]
-    #[diagnostic(
-        code(zem::board::arch_mismatch),
-        help("remove [target].arch; it is detected from the board automatically")
-    )]
-    ArchMismatch {
-        requested: Arch,
-        soc: &'static str,
-        actual: Arch,
-    },
 }

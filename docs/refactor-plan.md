@@ -63,13 +63,13 @@
 
 後方互換不要の前提で、冗長な設定項目と状態フィールドを削除する。
 
-- [ ] `[target].arch` を削除
+- [x] `[target].arch` を削除
   - `src/config/schema.rs` (`Target.arch`)
   - `src/config/validate.rs` / `src/board/resolve.rs` (`arch_override` 引数)
   - `src/board/mod.rs` (`BoardError::ArchMismatch`)
-- [ ] `ProjectState.sdk` / `ProjectEntry.sdk` を `Option<...>` から必須フィールドへ変更
+- [x] `ProjectState.sdk` / `ProjectEntry.sdk` を `Option<...>` から必須フィールドへ変更
   - `src/project/state.rs`, `src/store/registry.rs`, `src/session.rs`, `src/doctor/checks.rs`, `src/store/gc.rs`
-- [ ] `TargetState.source` (`ResolutionSource`) の保存を廃止
+- [x] `TargetState.source` (`ResolutionSource`) の保存を廃止
   - `src/project/state.rs`, `src/sync/run.rs`, `src/store/gc.rs`
 
 ---

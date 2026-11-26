@@ -221,7 +221,6 @@ mod tests {
             },
             target: Target {
                 board: "esp32c3_devkitm".into(),
-                arch: None,
             },
             modules: Default::default(),
             blobs: Default::default(),

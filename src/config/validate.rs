@@ -126,7 +126,7 @@ pub fn validate(cfg: &ZemConfig) -> Result<Validated> {
         return Err(ZemError::ConfigInvalid { problems });
     }
 
-    let target = board::resolve_static(&cfg.target.board, cfg.target.arch)?;
+    let target = board::resolve_static(&cfg.target.board)?;
     if let (RevisionKind::Release { major, minor, .. }, Some(absent)) =
         (&revision, target.soc.absent_through())
         && (*major, *minor) <= absent

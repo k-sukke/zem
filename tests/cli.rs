@@ -470,8 +470,7 @@ mod synced {
                 "board": "esp32c3_devkitm",
                 "soc": "esp32c3",
                 "arch": "riscv",
-                "toolchains": ["riscv64-zephyr-elf"],
-                "source": "board_yml"
+                "toolchains": ["riscv64-zephyr-elf"]
             },
             "workspace": { "key": "zephyr-v4.2.0-test", "path": ws },
             "zephyr_base": ws.join("zephyr"),

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::ProjectDir;
-use crate::board::{Arch, ResolutionSource};
+use crate::board::Arch;
 use crate::error::Result;
 use crate::fsutil;
 
@@ -25,8 +25,7 @@ pub struct ProjectState {
     /// Modules this project builds with (not the whole shared workspace).
     pub modules: BTreeMap<String, PathBuf>,
     pub venv: StoreRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sdk: Option<StoreRef>,
+    pub sdk: StoreRef,
     pub synced_at: u64,
 }
 
@@ -36,7 +35,6 @@ pub struct TargetState {
     pub soc: String,
     pub arch: Arch,
     pub toolchains: Vec<String>,
-    pub source: ResolutionSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,7 +98,6 @@ mod tests {
                 soc: "esp32c3".into(),
                 arch: Arch::Riscv,
                 toolchains: vec!["riscv64-zephyr-elf".into()],
-                source: ResolutionSource::BoardYml,
             },
             workspace: StoreRef {
                 key: "zephyr-v4.2.0-x".into(),
@@ -115,7 +112,10 @@ mod tests {
                 key: "py3.12-x".into(),
                 path: "/zh/venvs/py3.12-x".into(),
             },
-            sdk: None,
+            sdk: StoreRef {
+                key: "0.17.2".into(),
+                path: "/zh/sdk/zephyr-sdk-0.17.2".into(),
+            },
             synced_at: 0,
         };
         project.write_state(&state).unwrap();

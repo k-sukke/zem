@@ -84,7 +84,7 @@ pub fn run(ctx: &Context, args: InitArgs) -> Result<ExitCode> {
         None => DEFAULT_ZEPHYR_VERSION.to_string(),
     };
 
-    let target = board::resolve_static(&board_input, None)?;
+    let target = board::resolve_static(&board_input)?;
     let text = config::render(&InitParams {
         name: &name,
         board: &target.board,

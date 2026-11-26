@@ -5,7 +5,7 @@ use console::style;
 
 use super::SyncPlan;
 use super::plan::short;
-use crate::board::{ResolutionSource, board_yml};
+use crate::board::board_yml;
 use crate::config::{LoadedConfig, classify_revision};
 use crate::env::{EnvBuilder, EnvLocations, zem_env};
 use crate::error::{Result, ZemError};
@@ -284,8 +284,7 @@ fn run_steps(
 
     steps.begin("Board");
     board_yml::verify(&ws.zephyr_base, &plan.target, &cfg.zephyr.version)?;
-    let mut target = plan.target.clone();
-    target.source = ResolutionSource::BoardYml;
+    let target = &plan.target;
     steps.done(format!(
         "{} ({} / {})",
         target.board,
@@ -365,7 +364,6 @@ fn run_steps(
             soc: target.soc.name().to_string(),
             arch: target.arch,
             toolchains: target.toolchains.iter().map(|s| s.to_string()).collect(),
-            source: target.source,
         },
         workspace: StoreRef {
             key: ws_key.clone(),
@@ -377,10 +375,10 @@ fn run_steps(
             key: venv_key.clone(),
             path: plan.venv_dir.clone(),
         },
-        sdk: Some(StoreRef {
+        sdk: StoreRef {
             key: sdk_version.clone(),
             path: sdk_out.dir.clone(),
-        }),
+        },
         synced_at,
     };
     let lock = Lockfile {
@@ -412,7 +410,7 @@ fn run_steps(
         ProjectEntry {
             workspace: ws_key,
             venv: venv_key,
-            sdk: Some(sdk_version),
+            sdk: sdk_version,
             last_sync: synced_at,
         },
     )?;

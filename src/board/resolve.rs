@@ -1,14 +1,10 @@
-use serde::{Deserialize, Serialize};
-
 use super::{Arch, BoardError, BoardId, Soc, known_board};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionSource {
     Qualifier,
     StaticTable,
     Heuristic,
-    BoardYml,
 }
 
 impl ResolutionSource {
@@ -17,7 +13,6 @@ impl ResolutionSource {
             ResolutionSource::Qualifier => "board qualifier",
             ResolutionSource::StaticTable => "known board table",
             ResolutionSource::Heuristic => "board name prefix",
-            ResolutionSource::BoardYml => "board.yml",
         }
     }
 }
@@ -38,10 +33,7 @@ pub struct ResolvedTarget {
 
 /// Resolve a board without a Zephyr checkout. The result is re-validated against
 /// `board.yml` once the workspace exists.
-pub fn resolve_static(
-    input: &str,
-    arch_override: Option<Arch>,
-) -> Result<ResolvedTarget, BoardError> {
+pub fn resolve_static(input: &str) -> Result<ResolvedTarget, BoardError> {
     let id = BoardId::parse(input)?;
     let known = known_board(&id.name);
 
@@ -70,14 +62,6 @@ pub fn resolve_static(
         return Err(BoardError::Unknown(input.trim().to_string()));
     };
 
-    if let Some(requested) = arch_override.filter(|a| *a != soc.arch()) {
-        return Err(BoardError::ArchMismatch {
-            requested,
-            soc: soc.name(),
-            actual: soc.arch(),
-        });
-    }
-
     let board = board.to_string();
     let normalized_from = (board != input.trim()).then(|| input.trim().to_string());
     Ok(ResolvedTarget {
@@ -97,7 +81,7 @@ mod tests {
     use super::*;
 
     fn resolve(board: &str) -> ResolvedTarget {
-        resolve_static(board, None).unwrap()
+        resolve_static(board).unwrap()
     }
 
     #[test]
@@ -149,11 +133,11 @@ mod tests {
     #[test]
     fn non_esp_boards_are_rejected() {
         assert!(matches!(
-            resolve_static("nrf52840dk/nrf52840", None),
+            resolve_static("nrf52840dk/nrf52840"),
             Err(BoardError::UnsupportedSoc { .. })
         ));
         assert!(matches!(
-            resolve_static("nucleo_f401re", None),
+            resolve_static("nucleo_f401re"),
             Err(BoardError::Unknown(_))
         ));
     }
@@ -161,17 +145,8 @@ mod tests {
     #[test]
     fn mismatched_qualifier_is_rejected() {
         assert!(matches!(
-            resolve_static("esp32s3_devkitc/esp32/procpu", None),
+            resolve_static("esp32s3_devkitc/esp32/procpu"),
             Err(BoardError::SocMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn arch_override_must_agree() {
-        assert!(resolve_static("esp32c3_devkitm", Some(Arch::Riscv)).is_ok());
-        assert!(matches!(
-            resolve_static("esp32c3_devkitm", Some(Arch::Xtensa)),
-            Err(BoardError::ArchMismatch { .. })
         ));
     }
 }
