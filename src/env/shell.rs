@@ -8,14 +8,20 @@ use super::EnvBuilder;
 pub enum ShellKind {
     Posix,
     Fish,
+    PowerShell,
+    Cmd,
     Json,
 }
 
 impl ShellKind {
-    /// From `$SHELL`; anything that is not fish gets POSIX syntax.
-    pub fn detect(shell_var: Option<&OsStr>) -> Self {
-        let is_fish = shell_var
-            .and_then(|s| std::path::Path::new(s).file_name())
+    /// From the user's shell (`$SHELL` on Unix); anything that is not fish gets POSIX syntax.
+    /// Without one (Windows), PowerShell, the default shell of Windows Terminal.
+    pub fn detect(user_shell: Option<&OsStr>) -> Self {
+        let Some(shell) = user_shell else {
+            return ShellKind::PowerShell;
+        };
+        let is_fish = std::path::Path::new(shell)
+            .file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with("fish"));
         if is_fish {
             ShellKind::Fish
@@ -32,9 +38,11 @@ impl FromStr for ShellKind {
         match s {
             "posix" | "sh" | "bash" | "zsh" => Ok(ShellKind::Posix),
             "fish" => Ok(ShellKind::Fish),
+            "powershell" | "pwsh" => Ok(ShellKind::PowerShell),
+            "cmd" => Ok(ShellKind::Cmd),
             "json" => Ok(ShellKind::Json),
             other => Err(format!(
-                "unsupported shell `{other}` (expected bash, zsh, sh, fish or json)"
+                "unsupported shell `{other}` (expected bash, zsh, sh, fish, powershell, cmd or json)"
             )),
         }
     }
@@ -74,6 +82,17 @@ fn fish_quote(value: &str) -> String {
     format!("'{}'", value.replace('\\', r"\\").replace('\'', r"\'"))
 }
 
+/// A PowerShell single-quoted string: only `'` is special and is doubled.
+pub fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// cmd output is a batch file (`call`ed by `.zem\activate.bat`), where `%` must be doubled.
+/// Inside `set "K=V"` no other character needs escaping.
+pub fn batch_escape(value: &str) -> String {
+    value.replace('%', "%%")
+}
+
 pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
     let mut out = String::new();
     match shell {
@@ -98,6 +117,33 @@ pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
                 } else {
                     out.push_str(&format!("set -gx {key} {}\n", fish_quote(value)));
                 }
+            }
+        }
+        ShellKind::PowerShell => {
+            for key in &diff.unset {
+                out.push_str(&format!(
+                    "Remove-Item -LiteralPath {} -ErrorAction SilentlyContinue\n",
+                    powershell_quote(&format!("Env:{key}"))
+                ));
+            }
+            for (key, value) in &diff.set {
+                out.push_str(&format!(
+                    "Set-Item -LiteralPath {} -Value {}\n",
+                    powershell_quote(&format!("Env:{key}")),
+                    powershell_quote(value)
+                ));
+            }
+        }
+        ShellKind::Cmd => {
+            for key in &diff.unset {
+                out.push_str(&format!("@set \"{}=\"\n", batch_escape(key)));
+            }
+            for (key, value) in &diff.set {
+                out.push_str(&format!(
+                    "@set \"{}={}\"\n",
+                    batch_escape(key),
+                    batch_escape(value)
+                ));
             }
         }
         ShellKind::Json => {
@@ -167,8 +213,37 @@ mod tests {
             ShellKind::detect(Some(OsStr::new("/bin/zsh"))),
             ShellKind::Posix
         );
-        assert_eq!(ShellKind::detect(None), ShellKind::Posix);
+        assert_eq!(ShellKind::detect(None), ShellKind::PowerShell);
         assert_eq!("bash".parse::<ShellKind>(), Ok(ShellKind::Posix));
-        assert!("powershell".parse::<ShellKind>().is_err());
+        assert_eq!("pwsh".parse::<ShellKind>(), Ok(ShellKind::PowerShell));
+        assert_eq!("cmd".parse::<ShellKind>(), Ok(ShellKind::Cmd));
+        assert!("tcsh".parse::<ShellKind>().is_err());
+    }
+
+    fn windows_sample() -> EnvDiff {
+        let current = EnvBuilder::from_vars([("IDF_PATH", r"C:\esp")]);
+        let target = EnvBuilder::from_vars([
+            ("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+            ("ZEPHYR_BASE", r"C:\Users\it's me\100%\zephyr"),
+        ]);
+        diff(&current, &target)
+    }
+
+    #[test]
+    fn renders_powershell() {
+        insta::assert_snapshot!(render(&windows_sample(), ShellKind::PowerShell), @r"
+        Remove-Item -LiteralPath 'Env:IDF_PATH' -ErrorAction SilentlyContinue
+        Set-Item -LiteralPath 'Env:PROGRAMFILES(X86)' -Value 'C:\Program Files (x86)'
+        Set-Item -LiteralPath 'Env:ZEPHYR_BASE' -Value 'C:\Users\it''s me\100%\zephyr'
+        ");
+    }
+
+    #[test]
+    fn renders_cmd_batch() {
+        insta::assert_snapshot!(render(&windows_sample(), ShellKind::Cmd), @r#"
+        @set "IDF_PATH="
+        @set "PROGRAMFILES(X86)=C:\Program Files (x86)"
+        @set "ZEPHYR_BASE=C:\Users\it's me\100%%\zephyr"
+        "#);
     }
 }

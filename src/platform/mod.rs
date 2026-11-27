@@ -193,6 +193,18 @@ pub fn run_replacing(cmd: Command) -> ZemError {
     }
 }
 
+/// The user's login shell: `$SHELL` on Unix. `None` on Windows, where `$SHELL` is only set
+/// inside MSYS/Git Bash and holds a path that native programs cannot start.
+pub fn user_shell() -> Option<PathBuf> {
+    imp::user_shell()
+}
+
+/// Shell for `zem shell` when the user has none: `/bin/sh` on Unix, PowerShell on Windows
+/// (PowerShell 7 `pwsh` if installed, else the built-in Windows PowerShell).
+pub fn fallback_shell() -> PathBuf {
+    imp::fallback_shell()
+}
+
 pub fn serial_port_hint() -> &'static str {
     imp::serial_port_hint()
 }

@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::{InstallHint, Os, SerialAccess};
@@ -69,6 +69,14 @@ pub fn tls_config() -> ureq::tls::TlsConfig {
 
 pub fn to_cmake_path(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
+}
+
+pub fn user_shell() -> Option<PathBuf> {
+    None
+}
+
+pub fn fallback_shell() -> PathBuf {
+    which::which("pwsh.exe").unwrap_or_else(|_| PathBuf::from("powershell.exe"))
 }
 
 pub fn serial_port_hint() -> &'static str {

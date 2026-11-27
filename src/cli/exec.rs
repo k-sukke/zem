@@ -29,14 +29,13 @@ pub struct RunArgs {
 
 #[derive(Debug, Args)]
 pub struct ShellArgs {
-    /// Shell to start (default: $SHELL)
+    /// Shell to start (default: $SHELL; PowerShell on Windows)
     #[arg(long)]
     pub shell: Option<PathBuf>,
 }
 
 /// Set inside `zem shell` to the project root, to refuse nesting.
 pub const ZEM_SHELL_ENV: &str = "ZEM_SHELL";
-const FALLBACK_SHELL: &str = "/bin/sh";
 
 fn open(ctx: &Context, command: &'static str) -> Result<Session> {
     platform::ensure_supported(command)?;
@@ -64,12 +63,8 @@ pub fn shell(ctx: &Context, args: ShellArgs) -> Result<ExitCode> {
     let session = Session::open(&ctx.cwd)?;
     let program = args
         .shell
-        .or_else(|| {
-            std::env::var_os("SHELL")
-                .filter(|s| !s.is_empty())
-                .map(PathBuf::from)
-        })
-        .unwrap_or_else(|| PathBuf::from(FALLBACK_SHELL));
+        .or_else(platform::user_shell)
+        .unwrap_or_else(platform::fallback_shell);
     let exe = std::env::current_exe().map_err(ZemError::io("zem"))?;
     let root = session.project.root();
     let name = &session.config().project.name;
@@ -79,7 +74,11 @@ pub fn shell(ctx: &Context, args: ShellArgs) -> Result<ExitCode> {
     let mut env = session.env();
     env.set(ZEM_SHELL_ENV, root);
     let mut args: Vec<OsString> = Vec::new();
-    match program.file_stem().and_then(|s| s.to_str()) {
+    let stem = program
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(str::to_ascii_lowercase);
+    match stem.as_deref() {
         Some("zsh") => {
             let dir = rc_dir.join("zsh");
             fsutil::atomic_write(
@@ -104,6 +103,19 @@ pub fn shell(ctx: &Context, args: ShellArgs) -> Result<ExitCode> {
         }
         Some("fish") => {
             args.extend(["-C".into(), activate::fish_init_command(root, &exe).into()]);
+        }
+        Some("pwsh" | "powershell") => {
+            let script = activate::powershell_init_command(root, &exe, &prompt);
+            args.extend([
+                "-NoLogo".into(),
+                "-NoExit".into(),
+                "-EncodedCommand".into(),
+                activate::powershell_encode(&script).into(),
+            ]);
+        }
+        Some("cmd") => {
+            let current = std::env::var("PROMPT").unwrap_or_else(|_| "$P$G".into());
+            env.set("PROMPT", format!("{prompt}{current}"));
         }
         _ => {}
     }
