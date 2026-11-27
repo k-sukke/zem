@@ -70,6 +70,10 @@ pub fn fallback_shell() -> PathBuf {
     PathBuf::from("/bin/sh")
 }
 
+pub fn long_paths_enabled() -> Option<bool> {
+    None
+}
+
 pub fn serial_port_hint() -> &'static str {
     if cfg!(target_os = "macos") {
         "/dev/cu.usbserial-XXXX"

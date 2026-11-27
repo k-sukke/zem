@@ -79,6 +79,27 @@ pub fn fallback_shell() -> PathBuf {
     which::which("pwsh.exe").unwrap_or_else(|_| PathBuf::from("powershell.exe"))
 }
 
+const FILESYSTEM_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\FileSystem";
+
+pub fn long_paths_enabled() -> Option<bool> {
+    let out = Command::new("reg")
+        .args(["query", FILESYSTEM_KEY, "/v", "LongPathsEnabled"])
+        .output()
+        .ok()?;
+    // A missing value means the default, which is disabled.
+    Some(parse_reg_dword(&String::from_utf8_lossy(&out.stdout)).is_some_and(|v| v != 0))
+}
+
+/// The value of a `REG_DWORD` line in `reg query` output, e.g. `    X    REG_DWORD    0x1`.
+fn parse_reg_dword(output: &str) -> Option<u32> {
+    output.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        let _name = parts.next()?;
+        (parts.next()? == "REG_DWORD").then_some(())?;
+        u32::from_str_radix(parts.next()?.trim_start_matches("0x"), 16).ok()
+    })
+}
+
 pub fn serial_port_hint() -> &'static str {
     "COM3"
 }
@@ -123,6 +144,13 @@ mod tests {
             std::fs::read(dest.join("tc").join("bin").join("tc-gcc.exe")).unwrap(),
             b"hello"
         );
+    }
+
+    #[test]
+    fn parses_reg_query_dword() {
+        let out = "\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\r\n    LongPathsEnabled    REG_DWORD    0x1\r\n\r\n";
+        assert_eq!(parse_reg_dword(out), Some(1));
+        assert_eq!(parse_reg_dword("ERROR: not found"), None);
     }
 
     #[test]

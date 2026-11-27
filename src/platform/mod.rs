@@ -52,7 +52,7 @@ impl Os {
 
     /// Whether zem can create and run environments (not just parse config) on this OS.
     pub fn runs_environments(self) -> bool {
-        matches!(self, Os::MacOs | Os::Linux)
+        matches!(self, Os::MacOs | Os::Linux | Os::Windows)
     }
 }
 
@@ -203,6 +203,12 @@ pub fn user_shell() -> Option<PathBuf> {
 /// (PowerShell 7 `pwsh` if installed, else the built-in Windows PowerShell).
 pub fn fallback_shell() -> PathBuf {
     imp::fallback_shell()
+}
+
+/// Whether Win32 paths longer than 260 characters are enabled (the `LongPathsEnabled`
+/// registry value). `None` where the limit does not exist or could not be read.
+pub fn long_paths_enabled() -> Option<bool> {
+    imp::long_paths_enabled()
 }
 
 pub fn serial_port_hint() -> &'static str {
