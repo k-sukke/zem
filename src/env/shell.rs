@@ -88,9 +88,22 @@ fn fish_quote(value: &str) -> String {
     format!("'{}'", value.replace('\\', r"\\").replace('\'', r"\'"))
 }
 
-/// A PowerShell single-quoted string: only `'` is special and is doubled.
+/// Characters PowerShell accepts as single quotes: `'` and the typographic `‘ ’ ‚ ‛`.
+const POWERSHELL_SINGLE_QUOTES: &[char] = &['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'];
+
+/// A PowerShell single-quoted string. Every single-quote character ends the string unless it
+/// is doubled, so each one is doubled.
 pub fn powershell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        if POWERSHELL_SINGLE_QUOTES.contains(&c) {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
 }
 
 /// cmd output is a batch file (`call`ed by `.zem\activate.bat`), where `%` must be doubled.
@@ -247,6 +260,15 @@ mod tests {
         Set-Item -LiteralPath 'Env:PROGRAMFILES(X86)' -Value 'C:\Program Files (x86)'
         Set-Item -LiteralPath 'Env:ZEPHYR_BASE' -Value 'C:\Users\it''s me\100%\zephyr'
         ");
+    }
+
+    #[test]
+    fn powershell_quote_doubles_typographic_quotes() {
+        assert_eq!(powershell_quote("it's"), "'it''s'");
+        assert_eq!(
+            powershell_quote("C:\\work\\O\u{2019}Brien \u{2018}x\u{201A}\u{201B}"),
+            "'C:\\work\\O\u{2019}\u{2019}Brien \u{2018}\u{2018}x\u{201A}\u{201A}\u{201B}\u{201B}'"
+        );
     }
 
     #[test]
