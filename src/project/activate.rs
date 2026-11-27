@@ -42,10 +42,21 @@ pub fn render_fish(root: &Path, fallback_exe: &Path) -> String {
     )
 }
 
-/// PowerShell pipes `zem env` output line by line; `Out-String` joins it into one script.
+/// Run `zem env` and apply its output. PowerShell decodes a native program's output with
+/// `[Console]::OutputEncoding`, often a legacy code page (e.g. 932), while zem writes UTF-8;
+/// switch to UTF-8 for the call so non-ASCII paths survive, and restore it afterwards.
+/// PowerShell pipes the output line by line; `Out-String` joins it into one script.
 fn powershell_apply(exe: &str, root: &Path) -> String {
     format!(
-        "& {exe} --project-dir {root} env --shell powershell | Out-String | Invoke-Expression\n",
+        "$__zem_enc = [Console]::OutputEncoding\n\
+         try {{\n\
+         \x20   [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n\
+         \x20   $__zem_out = & {exe} --project-dir {root} env --shell powershell | Out-String\n\
+         }} finally {{\n\
+         \x20   [Console]::OutputEncoding = $__zem_enc\n\
+         }}\n\
+         if ($__zem_out) {{ Invoke-Expression $__zem_out }}\n\
+         Remove-Variable __zem_enc, __zem_out\n",
         root = powershell_quote(&root.to_string_lossy()),
     )
 }
@@ -242,11 +253,23 @@ mod tests {
     }
 
     #[test]
+    fn powershell_reads_zem_output_as_utf8_and_restores_the_encoding() {
+        let ps1 = render_ps1(Path::new(r"C:\p"), Path::new(r"C:\zem.exe"));
+        let set = ps1
+            .find("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)")
+            .unwrap();
+        let call = ps1.find("$__zem_out = & $_zem").unwrap();
+        let restore = ps1.find("[Console]::OutputEncoding = $__zem_enc").unwrap();
+        let apply = ps1.find("Invoke-Expression $__zem_out").unwrap();
+        assert!(set < call && call < restore && restore < apply, "{ps1}");
+    }
+
+    #[test]
     fn powershell_prompt_wraps_the_existing_one() {
         let init =
             powershell_init_command(Path::new(r"C:\p"), Path::new(r"C:\zem.exe"), "(zem:demo) ");
         assert!(
-            init.starts_with("& 'C:\\zem.exe' --project-dir 'C:\\p' env"),
+            init.contains("$__zem_out = & 'C:\\zem.exe' --project-dir 'C:\\p' env"),
             "{init}"
         );
         assert!(

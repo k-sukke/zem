@@ -37,7 +37,7 @@ pub fn run(ctx: &Context, args: EnvArgs) -> Result<ExitCode> {
         let hint = match kind {
             ShellKind::Fish => "zem env | source  (or: source .zem/activate.fish)",
             ShellKind::PowerShell => {
-                "zem env | Out-String | Invoke-Expression  (or: . .zem\\activate.ps1)"
+                ". .zem\\activate.ps1  (it also decodes zem's UTF-8 output correctly)"
             }
             ShellKind::Cmd => ".zem\\activate.bat",
             _ => "eval \"$(zem env)\"  (or: . .zem/activate.sh)",
