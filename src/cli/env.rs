@@ -26,7 +26,10 @@ pub fn run(ctx: &Context, args: EnvArgs) -> Result<ExitCode> {
     platform::ensure_supported("zem env")?;
     let session = Session::open(&ctx.cwd)?;
     let kind = args.shell.unwrap_or_else(|| {
-        ShellKind::detect(platform::user_shell().as_deref().map(|p| p.as_os_str()))
+        ShellKind::detect(
+            platform::user_shell().as_deref().map(|p| p.as_os_str()),
+            platform::Os::current(),
+        )
     });
     let diff = shell::diff(&EnvBuilder::from_current(), &session.activation_env());
     print!("{}", shell::render(&diff, kind));

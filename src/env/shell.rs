@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::str::FromStr;
 
 use super::EnvBuilder;
+use crate::platform::Os;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellKind {
@@ -15,10 +16,15 @@ pub enum ShellKind {
 
 impl ShellKind {
     /// From the user's shell (`$SHELL` on Unix); anything that is not fish gets POSIX syntax.
-    /// Without one (Windows), PowerShell, the default shell of Windows Terminal.
-    pub fn detect(user_shell: Option<&OsStr>) -> Self {
-        let Some(shell) = user_shell else {
-            return ShellKind::PowerShell;
+    /// Without one, POSIX on Unix (matching `zem shell`'s `/bin/sh`) and PowerShell, the
+    /// default shell of Windows Terminal, on Windows.
+    pub fn detect(user_shell: Option<&OsStr>, os: Os) -> Self {
+        let Some(shell) = user_shell.filter(|s| !s.is_empty()) else {
+            return if os == Os::Windows {
+                ShellKind::PowerShell
+            } else {
+                ShellKind::Posix
+            };
         };
         let is_fish = std::path::Path::new(shell)
             .file_name()
@@ -206,14 +212,19 @@ mod tests {
     #[test]
     fn detects_shell() {
         assert_eq!(
-            ShellKind::detect(Some(OsStr::new("/opt/homebrew/bin/fish"))),
+            ShellKind::detect(Some(OsStr::new("/opt/homebrew/bin/fish")), Os::MacOs),
             ShellKind::Fish
         );
         assert_eq!(
-            ShellKind::detect(Some(OsStr::new("/bin/zsh"))),
+            ShellKind::detect(Some(OsStr::new("/bin/zsh")), Os::Linux),
             ShellKind::Posix
         );
-        assert_eq!(ShellKind::detect(None), ShellKind::PowerShell);
+        assert_eq!(ShellKind::detect(None, Os::Linux), ShellKind::Posix);
+        assert_eq!(
+            ShellKind::detect(Some(OsStr::new("")), Os::MacOs),
+            ShellKind::Posix
+        );
+        assert_eq!(ShellKind::detect(None, Os::Windows), ShellKind::PowerShell);
         assert_eq!("bash".parse::<ShellKind>(), Ok(ShellKind::Posix));
         assert_eq!("pwsh".parse::<ShellKind>(), Ok(ShellKind::PowerShell));
         assert_eq!("cmd".parse::<ShellKind>(), Ok(ShellKind::Cmd));
