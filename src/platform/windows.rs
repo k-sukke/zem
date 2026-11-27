@@ -51,11 +51,8 @@ pub fn run_replacing(mut cmd: Command) -> io::Error {
     }
 }
 
-pub fn extract_sdk_archive(_archive: &Path, _dest: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "extracting .7z SDK archives is not implemented yet",
-    ))
+pub fn extract_sdk_archive(archive: &Path, dest: &Path) -> io::Result<()> {
+    sevenz_rust2::decompress_file(archive, dest).map_err(io::Error::other)
 }
 
 pub fn tls_config() -> ureq::tls::TlsConfig {
@@ -95,6 +92,24 @@ mod tests {
     #[test]
     fn env_keys_are_case_insensitive() {
         assert!(env_key_eq(OsStr::new("Path"), OsStr::new("PATH")));
+    }
+
+    #[test]
+    fn extracts_7z() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let gcc = src.join("tc").join("bin").join("tc-gcc.exe");
+        std::fs::create_dir_all(gcc.parent().unwrap()).unwrap();
+        std::fs::write(&gcc, b"hello").unwrap();
+        let archive = tmp.path().join("t.7z");
+        sevenz_rust2::compress_to_path(&src, &archive).unwrap();
+
+        let dest = tmp.path().join("out");
+        extract_sdk_archive(&archive, &dest).unwrap();
+        assert_eq!(
+            std::fs::read(dest.join("tc").join("bin").join("tc-gcc.exe")).unwrap(),
+            b"hello"
+        );
     }
 
     #[test]
