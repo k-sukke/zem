@@ -44,7 +44,12 @@ pub fn env_key_eq(a: &OsStr, b: &OsStr) -> bool {
     }
 }
 
+/// The console delivers Ctrl-C to every process attached to it. The child decides what it
+/// means (west and serial monitors handle it themselves); zem only waits for it to exit, so
+/// it must not die first and leave the child running detached from the shell.
 pub fn run_replacing(mut cmd: Command) -> io::Error {
+    // Fails only if a handler is already installed, which also keeps zem alive.
+    let _ = ctrlc::set_handler(|| {});
     match cmd.status() {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(e) => e,
