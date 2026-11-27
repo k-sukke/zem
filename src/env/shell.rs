@@ -106,10 +106,28 @@ pub fn powershell_quote(value: &str) -> String {
     out
 }
 
-/// cmd output is a batch file (`call`ed by `.zem\activate.bat`), where `%` must be doubled.
-/// Inside `set "K=V"` no other character needs escaping.
+/// For text inside `"..."` in a batch file (`.zem\activate.bat`), where only `%` needs
+/// doubling. Windows paths cannot contain `"`.
 pub fn batch_escape(value: &str) -> String {
     value.replace('%', "%%")
+}
+
+/// For unquoted text in a batch file: `%` is doubled and cmd's metacharacters, `"` included,
+/// get a caret. Unlike `set "K=V"`, a `"` in the value cannot end the quoting and expose
+/// `&` or `|` to the parser.
+fn batch_caret_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '%' => out.push_str("%%"),
+            '^' | '&' | '|' | '<' | '>' | '"' | '(' | ')' => {
+                out.push('^');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
@@ -153,15 +171,24 @@ pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
                 ));
             }
         }
+        // cmd output is a batch file that `.zem\activate.bat` `call`s.
         ShellKind::Cmd => {
             for key in &diff.unset {
-                out.push_str(&format!("@set \"{}=\"\n", batch_escape(key)));
+                out.push_str(&format!("@set {}=\n", batch_caret_escape(key)));
             }
             for (key, value) in &diff.set {
+                if value.contains(['\r', '\n']) {
+                    // A line break would end the command and run the rest as another one.
+                    out.push_str(&format!(
+                        "@echo zem: {} is not set: cmd cannot hold a line break in a variable 1>&2\n",
+                        batch_caret_escape(key)
+                    ));
+                    continue;
+                }
                 out.push_str(&format!(
-                    "@set \"{}={}\"\n",
-                    batch_escape(key),
-                    batch_escape(value)
+                    "@set {}={}\n",
+                    batch_caret_escape(key),
+                    batch_caret_escape(value)
                 ));
             }
         }
@@ -274,9 +301,26 @@ mod tests {
     #[test]
     fn renders_cmd_batch() {
         insta::assert_snapshot!(render(&windows_sample(), ShellKind::Cmd), @r#"
-        @set "IDF_PATH="
-        @set "PROGRAMFILES(X86)=C:\Program Files (x86)"
-        @set "ZEPHYR_BASE=C:\Users\it's me\100%%\zephyr"
+        @set IDF_PATH=
+        @set PROGRAMFILES^(X86^)=C:\Program Files ^(x86^)
+        @set ZEPHYR_BASE=C:\Users\it's me\100%%\zephyr
         "#);
+    }
+
+    #[test]
+    fn cmd_values_with_quotes_keep_metacharacters_escaped() {
+        let current = EnvBuilder::from_vars([("A", "1")]);
+        let target = EnvBuilder::from_vars([
+            ("A", "1"),
+            ("CFLAGS", r#"-DNAME="a&b" ^x|y<z>"#),
+            ("BAD", "one\r\nexit"),
+        ]);
+        let out = render(&diff(&current, &target), ShellKind::Cmd);
+        assert!(
+            out.contains(r#"@set CFLAGS=-DNAME=^"a^&b^" ^^x^|y^<z^>"#),
+            "{out}"
+        );
+        assert!(!out.contains("exit"), "{out}");
+        assert!(out.contains("@echo zem: BAD is not set"), "{out}");
     }
 }
