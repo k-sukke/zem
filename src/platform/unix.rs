@@ -8,6 +8,7 @@ use super::{InstallHint, Os, SerialAccess};
 
 pub const EXE_SUFFIX: &str = "";
 pub const SDK_ARCHIVE_EXT: &str = ".tar.xz";
+pub const UV_ARCHIVE_EXT: &str = ".tar.gz";
 pub const VENV_BIN_DIR: &str = "bin";
 
 pub const STRICT_ENV_ALLOWLIST: &[&str] = &[

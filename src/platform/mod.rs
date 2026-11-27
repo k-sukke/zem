@@ -96,15 +96,22 @@ pub fn venv_python(venv: &Path) -> PathBuf {
     venv_bin_dir(venv).join(exe_name("python"))
 }
 
-/// Target triple of the uv release asset for this host (`uv-<target>.tar.gz`), or `None`.
+/// Target triple of the uv release asset for this host (`uv-<target><uv_archive_ext>`), or `None`.
 pub fn uv_target() -> Option<&'static str> {
     match (Os::current(), arch_name()) {
         (Os::MacOs, "aarch64") => Some("aarch64-apple-darwin"),
         (Os::MacOs, "x86_64") => Some("x86_64-apple-darwin"),
         (Os::Linux, "x86_64") => Some("x86_64-unknown-linux-musl"),
         (Os::Linux, "aarch64") => Some("aarch64-unknown-linux-musl"),
+        (Os::Windows, "x86_64") => Some("x86_64-pc-windows-msvc"),
+        (Os::Windows, "aarch64") => Some("aarch64-pc-windows-msvc"),
         _ => None,
     }
+}
+
+/// Archive format of uv release assets: `.tar.gz` on Unix, `.zip` on Windows.
+pub fn uv_archive_ext() -> &'static str {
+    imp::UV_ARCHIVE_EXT
 }
 
 /// Environment variable names are case-insensitive on Windows (`Path` == `PATH`).
