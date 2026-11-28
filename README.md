@@ -14,11 +14,11 @@ zem west espressif monitor
 > [!WARNING]
 > **This project is experimental.**
 > - Commands, the `zem.toml` / `zem.lock` formats and the `~/.zem` layout may change without notice.
-> - It has been tested on real hardware **only with an ESP32 (ESP32-D0WD-V3 / `esp32_devkitc`) on macOS (Apple Silicon)**.
+> - It has been tested on real hardware **only with an ESP32 (ESP32-D0WD-V3 / `esp32_devkitc`)**, on macOS (Apple Silicon)
+>   and on Windows 11 on ARM (in a [UTM](https://mac.getutm.app/) virtual machine on macOS, running the x86_64 binary
+>   under emulation). Native x86_64 Windows has not been tested on real hardware.
 >   ESP32-S3 / C3 / C6 have only been verified to build. Other SoCs and boards are untested.
 > - On Linux only the automated tests have been run (no hardware or end-to-end testing yet).
-> - Windows (x86_64) support is new: it builds and passes the automated tests, but has not been tested end to end
->   (sync, build and flash) on a real machine yet.
 > - The only Zephyr version tested is v4.2.0.
 >
 > Please report problems via Issues.
