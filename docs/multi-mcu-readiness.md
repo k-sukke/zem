@@ -64,7 +64,7 @@ S1・S2・S7 は**新しい MCU を足す前に必ず**済ませる。S3 は 2 �
 | 箇所 | 内容 | 拡張時の問題 |
 |---|---|---|
 | 書き込み | ESP32 は hal_espressif 同梱の esptool（Python）だけで完結する | 他ベンダーは nrfutil / J-Link / OpenOCD / STM32CubeProgrammer / LinkServer / pyOCD / probe-rs / picotool など、多くが**ホスト側のネイティブツール**で、一部はプロプライエタリでライセンス同意が必要。zem は現状何も面倒を見ていない |
-| `src/serial.rs` の `known_bridge` | CP210x / CH34x / FTDI / Espressif USB のみ | ST-LINK の VCOM、J-Link の CDC、CMSIS-DAP（DAPLink）、nRF の USB などを表示できない |
+| `src/serial.rs` の `known_bridge` | CP210x / CH34x / FTDI / Espressif USB のみ | 未知の VID/PID のポートも一覧には出る（USB の product 文字列か「USB serial」で表示）が、ST-LINK の VCOM、J-Link の CDC、CMSIS-DAP（DAPLink）、nRF の USB などに分かりやすいラベルが付かない |
 | `platform::serial_access`（doctor） | Linux の `dialout` / `uucp` グループを確認 | デバッグプローブには udev ルールが必要（グループだけでは足りない）。Windows では WinUSB ドライバ（Zadig 等）が必要なプローブもある |
 | `src/env/sanitize.rs`、`src/doctor/checks.rs` の `CONFLICTING_VARS` | ESP-IDF・Zephyr・Python 系の変数と PATH を除外 | nRF Connect SDK（toolchain manager が `ZEPHYR_BASE` や独自の PATH を入れる）、STM32CubeIDE / MCUXpresso の同梱ツールチェーン、ホストの `arm-none-eabi-gcc` などを考慮していない（`GNUARMEMB_TOOLCHAIN_PATH` / `CROSS_COMPILE` だけは除外済み） |
 
@@ -156,9 +156,12 @@ pub struct VendorProfile {
 
 ```
 現在:  モジュール集合を決める（静的解決が必要） → west update（zephyr + HAL） → board.yml で裏取り
-変更後: west update（zephyr 本体のみ） → ツリーからボードを解決 → HAL を和集合に追加して west update
+変更後: west update（zephyr 本体 + 明示指定のモジュール） → ツリーからボードを解決 → HAL を和集合に追加して west update
 ```
 
+- 1 段目では zephyr 本体に加えて、`zem.toml` で明示指定されたモジュール（`[modules].extra` と `features`）も取得する。
+  モジュールの `board_root` / `soc_root` にしかないボード・SoC は、そのモジュールを取得するまでツリーから見つけられないため。
+  アプリの `boards/` はプロジェクト内にあるので、取得の順序には影響しない。
 - ワークスペースのモジュールは「追加のみ」の不変条件（mvp-plan.md §4.4）なので、2 段にしても既存の仕組みで安全に追加できる。
   追加の `west update` は no-op なら約 1.6 秒（スパイクの実測）。
 - 静的表（`curated_boards`）は**オフラインでの即時検証・`init` の候補・`--dry-run`** 用の「ヒント」に格下げし、ツリーの結果と食い違えばツリーを正とする（現在の方針の延長）。
