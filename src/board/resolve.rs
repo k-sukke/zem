@@ -65,21 +65,33 @@ pub fn resolve_static(
             }
             (found, ResolutionSource::Qualifier, id.clone())
         } else if let Some((vendor, k)) = known {
-            let board = match k.default_qualifiers {
-                Some(q) => id.with_qualifiers(q),
-                None => id.clone(),
-            };
             let soc = vendor
                 .soc(k.soc)
                 .expect("known boards use their vendor's SoCs");
-            ((vendor, soc), ResolutionSource::StaticTable, board)
+            (
+                (vendor, soc),
+                ResolutionSource::StaticTable,
+                with_defaults(&id, soc),
+            )
         } else if let Some(found) = vendor::soc_from_board_prefix(&id.name) {
-            (found, ResolutionSource::Heuristic, id.clone())
+            (
+                found,
+                ResolutionSource::Heuristic,
+                with_defaults(&id, found.1),
+            )
         } else {
             return Ok(None);
         };
 
     build(input, &board, vendor, soc, source, arch_override).map(Some)
+}
+
+/// A bare board name plus the SoC's default qualifiers, if it has any.
+fn with_defaults(id: &BoardId, soc: &SocInfo) -> BoardId {
+    match soc.default_qualifiers() {
+        Some(q) if id.qualifiers.is_empty() => id.with_qualifiers(&q),
+        _ => id.clone(),
+    }
 }
 
 /// The target for `board` (the full name passed to `west build -b`) on `soc` of `vendor`.

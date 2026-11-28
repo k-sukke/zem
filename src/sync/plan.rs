@@ -137,7 +137,10 @@ impl SyncPlan {
                 "soc / arch",
                 match &self.target {
                     Some(t) => format!("{} / {} (via {})", t.soc, t.arch, t.source.describe()),
-                    None => "resolved from the Zephyr tree during sync".to_string(),
+                    None => format!(
+                        "resolved from the Zephyr tree during sync (supported SoCs: {})",
+                        crate::vendor::supported_socs()
+                    ),
                 },
             ),
             (
