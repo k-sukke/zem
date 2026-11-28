@@ -15,11 +15,11 @@ pub fn module_for(feature: Feature) -> &'static str {
 }
 
 /// Modules this project builds with; a subset of what the shared workspace contains.
-pub fn project_modules(config: &ZemConfig, target: &ResolvedTarget) -> BTreeSet<String> {
+/// Without a target (board not resolved yet), only the modules the config names.
+pub fn project_modules(config: &ZemConfig, target: Option<&ResolvedTarget>) -> BTreeSet<String> {
     target
-        .hal_modules
-        .iter()
-        .cloned()
+        .into_iter()
+        .flat_map(|t| t.hal_modules.iter().cloned())
         .chain(
             config
                 .modules
@@ -54,7 +54,7 @@ extra = ["littlefs", "hal_espressif"]
 "#;
         let cfg = parse(Path::new("zem.toml"), text).unwrap();
         let target = validate(&cfg).unwrap().target;
-        let modules: Vec<_> = project_modules(&cfg, &target).into_iter().collect();
+        let modules: Vec<_> = project_modules(&cfg, target.as_ref()).into_iter().collect();
         assert_eq!(modules, ["hal_espressif", "littlefs", "mbedtls"]);
     }
 }

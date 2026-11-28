@@ -38,12 +38,14 @@ pub struct ResolvedTarget {
     pub normalized_from: Option<String>,
 }
 
-/// Resolve a board without a Zephyr checkout. The result is re-validated against
-/// `board.yml` once the workspace exists.
+/// Resolve a board without a Zephyr checkout, from its SoC qualifier, the vendors' known
+/// boards or its name prefix. `None` means zem cannot tell the SoC from the name alone;
+/// sync then resolves it from the Zephyr tree (`board_yml::resolve`), which also re-checks
+/// every result of this function.
 pub fn resolve_static(
     input: &str,
     arch_override: Option<Arch>,
-) -> Result<ResolvedTarget, BoardError> {
+) -> Result<Option<ResolvedTarget>, BoardError> {
     let id = BoardId::parse(input)?;
     let known = vendor::find_board(&id.name);
 
@@ -74,12 +76,21 @@ pub fn resolve_static(
         } else if let Some(found) = vendor::soc_from_board_prefix(&id.name) {
             (found, ResolutionSource::Heuristic, id.clone())
         } else {
-            return Err(BoardError::Unknown {
-                board: input.trim().to_string(),
-                supported: vendor::supported_socs(),
-            });
+            return Ok(None);
         };
 
+    build(input, &board, vendor, soc, source, arch_override).map(Some)
+}
+
+/// The target for `board` (the full name passed to `west build -b`) on `soc` of `vendor`.
+pub(super) fn build(
+    input: &str,
+    board: &BoardId,
+    vendor: &'static VendorProfile,
+    soc: &'static SocInfo,
+    source: ResolutionSource,
+    arch_override: Option<Arch>,
+) -> Result<ResolvedTarget, BoardError> {
     if let Some(requested) = arch_override.filter(|a| *a != soc.arch) {
         return Err(BoardError::ArchMismatch {
             requested,
@@ -108,7 +119,7 @@ mod tests {
     use super::*;
 
     fn resolve(board: &str) -> ResolvedTarget {
-        resolve_static(board, None).unwrap()
+        resolve_static(board, None).unwrap().unwrap()
     }
 
     #[test]
@@ -158,15 +169,12 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_socs_and_unknown_boards_are_rejected() {
+    fn unsupported_socs_are_rejected_and_unknown_boards_deferred() {
         assert!(matches!(
             resolve_static("nrf52840dk/nrf52840", None),
             Err(BoardError::UnsupportedSoc { .. })
         ));
-        assert!(matches!(
-            resolve_static("nucleo_f401re", None),
-            Err(BoardError::Unknown { .. })
-        ));
+        assert_eq!(resolve_static("nucleo_f401re", None), Ok(None));
     }
 
     #[test]

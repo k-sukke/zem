@@ -53,8 +53,6 @@ pub struct SocInfo {
     pub arch: Arch,
     /// Zephyr SDK toolchain directory / `west sdk install -t` name.
     pub toolchain: &'static str,
-    /// Latest Zephyr release (major, minor) known to lack this SoC entirely.
-    pub absent_through: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,17 +118,11 @@ impl UsbId {
     }
 }
 
-const fn soc(
-    name: &'static str,
-    arch: Arch,
-    toolchain: &'static str,
-    absent_through: Option<(u32, u32)>,
-) -> SocInfo {
+const fn soc(name: &'static str, arch: Arch, toolchain: &'static str) -> SocInfo {
     SocInfo {
         name,
         arch,
         toolchain,
-        absent_through,
     }
 }
 

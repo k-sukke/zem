@@ -58,7 +58,8 @@ pub fn classify_revision(rev: &str) -> RevisionKind {
 
 #[derive(Debug, Clone)]
 pub struct Validated {
-    pub target: ResolvedTarget,
+    /// `None` when the board can only be resolved from the Zephyr tree, during sync.
+    pub target: Option<ResolvedTarget>,
     pub revision: RevisionKind,
     pub warnings: Vec<String>,
 }
@@ -129,21 +130,12 @@ pub fn validate(cfg: &ZemConfig) -> Result<Validated> {
     }
 
     let target = board::resolve_static(&cfg.target.board, cfg.target.arch)?;
-    if let (RevisionKind::Release { major, minor, .. }, Some(absent)) =
-        (&revision, board::soc_absent_through(&target.soc))
-        && (*major, *minor) <= absent
+    if let Some(t) = &target
+        && let Some(original) = &t.normalized_from
     {
-        return Err(ZemError::ConfigInvalid {
-            problems: vec![format!(
-                "{} is not supported by Zephyr {} (first available after v{}.{})",
-                target.soc, cfg.zephyr.version, absent.0, absent.1
-            )],
-        });
-    }
-    if let Some(original) = &target.normalized_from {
         warnings.push(format!(
             "board `{original}` was expanded to `{}`; consider writing the full name in zem.toml",
-            target.board
+            t.board
         ));
     }
 
@@ -252,18 +244,14 @@ mod tests {
     fn warns_on_branch_and_normalization() {
         let v = validate(&config("esp32s3_devkitc", "main")).unwrap();
         assert_eq!(v.warnings.len(), 2, "{:?}", v.warnings);
-        assert_eq!(v.target.board, "esp32s3_devkitc/esp32s3/procpu");
+        assert_eq!(v.target.unwrap().board, "esp32s3_devkitc/esp32s3/procpu");
     }
 
     #[test]
-    fn rejects_soc_missing_from_release() {
-        let err = validate(&config("esp32h2_devkitm", "v4.2.0")).unwrap_err();
-        assert!(
-            err.to_string().contains("esp32h2 is not supported"),
-            "{err}"
-        );
-        assert!(validate(&config("esp32h2_devkitm", "v4.3.0")).is_ok());
-        assert!(validate(&config("esp32h2_devkitm", "main")).is_ok());
+    fn defers_boards_it_cannot_resolve() {
+        let v = validate(&config("m5stack_atoms3", "v4.2.0")).unwrap();
+        assert!(v.target.is_none());
+        assert!(v.warnings.is_empty(), "{:?}", v.warnings);
     }
 
     #[test]

@@ -22,9 +22,13 @@ pub fn render(m: &WestManifest<'_>) -> String {
     if m.shallow {
         out.push_str("      clone-depth: 1\n");
     }
-    out.push_str("      import:\n        name-allowlist:\n");
-    for module in m.modules {
-        let _ = writeln!(out, "          - {}", quote(module));
+    // West treats an empty allowlist as "no filter" and would import every project in
+    // zephyr's west.yml, so with no modules (board not resolved yet) import nothing at all.
+    if !m.modules.is_empty() {
+        out.push_str("      import:\n        name-allowlist:\n");
+        for module in m.modules {
+            let _ = writeln!(out, "          - {}", quote(module));
+        }
     }
     let _ = write!(out, "  self:\n    path: {MANIFEST_DIR}\n");
     out
@@ -76,5 +80,19 @@ mod tests {
             value["manifest"]["self"]["path"].as_str(),
             Some(MANIFEST_DIR)
         );
+    }
+
+    #[test]
+    fn imports_nothing_without_modules() {
+        let mods = modules(&[]);
+        let text = render(&WestManifest {
+            zephyr_url: "https://github.com/zephyrproject-rtos/zephyr",
+            revision: "v4.2.0",
+            shallow: true,
+            modules: &mods,
+        });
+        assert!(!text.contains("import"), "{text}");
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).unwrap();
+        assert_eq!(yaml["manifest"]["projects"][0]["name"], "zephyr");
     }
 }

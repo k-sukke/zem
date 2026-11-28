@@ -21,6 +21,10 @@ const FILES: &[(&str, &str)] = &[
         "board:\n  name: xiao_esp32s3\n  socs:\n  - name: esp32s3\n    variants:\n    - name: 'sense'\n      cpucluster: 'procpu'\n",
     ),
     (
+        "boards/m5stack/m5stack_atoms3/board.yml",
+        "board:\n  name: m5stack_atoms3\n  vendor: m5stack\n  socs:\n  - name: esp32s3\n",
+    ),
+    (
         "soc/espressif/soc.yml",
         "family:\n- name: espressif_esp32\n  series:\n  - name: esp32s3\n    socs:\n    - name: esp32s3\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32c3\n    socs:\n    - name: esp32c3\n",
     ),
