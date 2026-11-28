@@ -51,11 +51,11 @@ pub fn resolve_static(
 
     let ((vendor, soc), source, board): ((&VendorProfile, &SocInfo), _, _) =
         if let Some(qualifier) = id.soc() {
-            let found = vendor::find_soc(qualifier).ok_or_else(|| BoardError::UnsupportedSoc {
-                board: input.trim().to_string(),
-                soc: qualifier.to_string(),
-                supported: vendor::supported_socs(),
-            })?;
+            // A SoC missing from the tables may still exist in the tree (a newer SoC of a
+            // supported vendor), so leave it to sync instead of rejecting it here.
+            let Some(found) = vendor::find_soc(qualifier) else {
+                return Ok(None);
+            };
             if let Some((_, k)) = known.filter(|(_, k)| k.soc != found.1.name) {
                 return Err(BoardError::SocMismatch {
                     board: id.name.clone(),
@@ -81,7 +81,17 @@ pub fn resolve_static(
             return Ok(None);
         };
 
-    build(input, &board, vendor, soc, source, arch_override).map(Some)
+    check_arch(arch_override, soc.name, soc.arch)?;
+    build(
+        input,
+        &board,
+        vendor,
+        soc.name,
+        soc.arch,
+        soc.toolchain,
+        source,
+    )
+    .map(Some)
 }
 
 /// A bare board name plus the SoC's default qualifiers, if it has any.
@@ -92,31 +102,52 @@ fn with_defaults(id: &BoardId, soc: &SocInfo) -> BoardId {
     }
 }
 
+/// `[target].arch` must agree with what zem found.
+pub(super) fn check_arch(
+    requested: Option<Arch>,
+    soc: &str,
+    actual: Arch,
+) -> Result<(), BoardError> {
+    match requested {
+        Some(requested) if requested != actual => Err(BoardError::ArchMismatch {
+            requested,
+            soc: soc.to_string(),
+            actual,
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// The target for `board` (the full name passed to `west build -b`) on `soc` of `vendor`.
+/// The toolchain is the SoC's own when the profile names one, else the architecture's.
 pub(super) fn build(
     input: &str,
     board: &BoardId,
     vendor: &'static VendorProfile,
-    soc: &'static SocInfo,
+    soc: &str,
+    arch: Arch,
+    soc_toolchain: Option<&str>,
     source: ResolutionSource,
-    arch_override: Option<Arch>,
 ) -> Result<ResolvedTarget, BoardError> {
-    if let Some(requested) = arch_override.filter(|a| *a != soc.arch) {
-        return Err(BoardError::ArchMismatch {
-            requested,
-            soc: soc.name.to_string(),
-            actual: soc.arch,
-        });
-    }
-
+    let toolchains = match soc_toolchain.or(arch.default_toolchain()) {
+        Some(toolchain) => vec![toolchain.to_string()],
+        // Host builds (native_sim) use the host compiler.
+        None if arch == Arch::Posix => Vec::new(),
+        None => {
+            return Err(BoardError::NoToolchain {
+                soc: soc.to_string(),
+                arch,
+            });
+        }
+    };
     let board = board.to_string();
     let normalized_from = (board != input.trim()).then(|| input.trim().to_string());
     Ok(ResolvedTarget {
         board,
         vendor,
-        soc: SocId::new(soc.name),
-        arch: soc.arch,
-        toolchains: vec![soc.toolchain.to_string()],
+        soc: SocId::new(soc),
+        arch,
+        toolchains,
         hal_modules: vendor.hal_modules.iter().map(|m| m.to_string()).collect(),
         blob_modules: vendor.blob_modules.iter().map(|m| m.to_string()).collect(),
         source,
@@ -179,11 +210,13 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_socs_are_rejected_and_unknown_boards_deferred() {
-        assert!(matches!(
-            resolve_static("nrf52840dk/nrf52840", None),
-            Err(BoardError::UnsupportedSoc { .. })
-        ));
+    fn unknown_socs_and_boards_are_deferred() {
+        // Unknown SoCs are left to the tree, which knows every SoC and its vendor.
+        assert_eq!(resolve_static("nrf52840dk/nrf52840", None), Ok(None));
+        assert_eq!(
+            resolve_static("esp32c5_devkitc/esp32c5/hpcore", None),
+            Ok(None)
+        );
         assert_eq!(resolve_static("nucleo_f401re", None), Ok(None));
     }
 

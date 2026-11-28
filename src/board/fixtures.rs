@@ -26,7 +26,30 @@ const FILES: &[(&str, &str)] = &[
     ),
     (
         "soc/espressif/soc.yml",
-        "family:\n- name: espressif_esp32\n  series:\n  - name: esp32\n    socs:\n    - name: esp32\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32s3\n    socs:\n    - name: esp32s3\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32c3\n    socs:\n    - name: esp32c3\n  - name: esp32c6\n    socs:\n    - name: esp32c6\n      cpuclusters:\n      - name: hpcore\n      - name: lpcore\n",
+        "family:\n- name: espressif_esp32\n  series:\n  - name: esp32\n    socs:\n    - name: esp32\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32s3\n    socs:\n    - name: esp32s3\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32c3\n    socs:\n    - name: esp32c3\n  - name: esp32c6\n    socs:\n    - name: esp32c6\n      cpuclusters:\n      - name: hpcore\n      - name: lpcore\n  - name: esp32c5\n    socs:\n    - name: esp32c5\n      cpuclusters:\n      - name: hpcore\n      - name: lpcore\n",
+    ),
+    // Twister metadata, as in v4.2.0 (`identifier` + `arch`).
+    (
+        "boards/espressif/esp32s3_devkitc/esp32s3_devkitc_procpu.yaml",
+        "identifier: esp32s3_devkitc/esp32s3/procpu\nname: ESP32-S3 DevKitC PROCPU\ntype: mcu\narch: xtensa\n",
+    ),
+    (
+        "boards/espressif/esp32c3_devkitm/esp32c3_devkitm.yaml",
+        "identifier: esp32c3_devkitm\nname: ESP32-C3-DevKitM\ntype: mcu\narch: riscv\n",
+    ),
+    (
+        "boards/raspberrypi/rpi_pico/rpi_pico.yaml",
+        "identifier: rpi_pico\nname: Raspberry Pi Pico\ntype: mcu\narch: arm\n",
+    ),
+    // Hypothetical: a SoC of a supported vendor that zem's tables do not list, as a later
+    // Zephyr release would add (v4.2.0 has no esp32c5). Twister covers only one cluster.
+    (
+        "boards/espressif/esp32c5_devkitc/board.yml",
+        "board:\n  name: esp32c5_devkitc\n  vendor: espressif\n  socs:\n  - name: esp32c5\n",
+    ),
+    (
+        "boards/espressif/esp32c5_devkitc/esp32c5_devkitc_hpcore.yaml",
+        "identifier: esp32c5_devkitc/esp32c5/hpcore\ntype: mcu\narch: riscv\n",
     ),
     // Nordic: two clusters, a TrustZone variant on the application core only.
     (
@@ -81,6 +104,11 @@ const FILES: &[(&str, &str)] = &[
     (
         "soc/realtek/ec/soc.yml",
         "socs:\n- name: rts5912\n- name: rts5915\n",
+    ),
+    // A board with two SoCs (like sam_v71_xult or nrf52840dk): the bare name is ambiguous.
+    (
+        "boards/other/dual_soc_board/board.yml",
+        "board:\n  name: dual_soc_board\n  socs:\n  - name: esp32c3\n  - name: esp32c6\n",
     ),
     // A file that defines several boards.
     (

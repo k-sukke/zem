@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::resolve::build;
+use super::resolve::{build, check_arch};
 use super::{Arch, BoardError, BoardId, ResolutionSource, ResolvedTarget};
 use crate::vendor;
 
@@ -20,6 +20,9 @@ struct BoardFile {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BoardEntry {
     pub name: String,
+    /// Directory of the board.yml, which also holds the board's twister metadata.
+    #[serde(skip)]
+    pub dir: PathBuf,
     #[serde(default)]
     pub socs: Vec<BoardSoc>,
 }
@@ -94,14 +97,53 @@ pub fn find_board(zephyr_base: &Path, name: &str) -> Option<BoardEntry> {
     let needle = format!("name: {name}");
     files_named(&zephyr_base.join("boards"), "board.yml")
         .into_iter()
-        .filter_map(|path| fs::read_to_string(path).ok())
-        .filter(|text| {
+        .filter_map(|path| fs::read_to_string(&path).ok().map(|text| (path, text)))
+        .filter(|(_, text)| {
             text.lines()
                 .any(|l| l.trim_start().trim_start_matches("- ") == needle)
         })
-        .filter_map(|text| serde_yaml_ng::from_str::<BoardFile>(&text).ok())
-        .flat_map(|f| f.board.into_iter().chain(f.boards))
+        .filter_map(|(path, text)| {
+            let file = serde_yaml_ng::from_str::<BoardFile>(&text).ok()?;
+            let dir = path.parent()?.to_path_buf();
+            Some(
+                file.board
+                    .into_iter()
+                    .chain(file.boards)
+                    .map(move |b| BoardEntry {
+                        dir: dir.clone(),
+                        ..b
+                    }),
+            )
+        })
+        .flatten()
         .find(|b| b.name == name)
+}
+
+/// Twister metadata next to a board.yml (`<board_target>.yaml`).
+#[derive(Debug, Deserialize)]
+struct TwisterBoard {
+    identifier: String,
+    arch: String,
+}
+
+/// Architecture of a build target, from the twister metadata in the board's directory.
+/// Without a CPU cluster, twister may name the target `board` or `board/soc`.
+fn twister_arch(board: &BoardEntry, soc: &str, target: &str) -> Option<Arch> {
+    let with_soc = format!("{}/{soc}", board.name);
+    let names: Vec<&str> = if target == board.name || target == with_soc {
+        vec![board.name.as_str(), with_soc.as_str()]
+    } else {
+        vec![target]
+    };
+    fs::read_dir(&board.dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "yaml"))
+        .filter_map(|p| fs::read_to_string(p).ok())
+        .filter_map(|text| serde_yaml_ng::from_str::<TwisterBoard>(&text).ok())
+        .find(|t| names.contains(&t.identifier.as_str()))
+        .and_then(|t| serde_yaml_ng::from_str::<Arch>(&t.arch).ok())
 }
 
 fn files_named(dir: &Path, file_name: &str) -> Vec<PathBuf> {
@@ -127,17 +169,24 @@ fn files_named(dir: &Path, file_name: &str) -> Vec<PathBuf> {
 /// different depths, e.g. `soc/espressif/soc.yml` and `soc/st/stm32/soc.yml`).
 pub fn soc_cpuclusters(zephyr_base: &Path, soc: &str) -> Vec<String> {
     find_soc(zephyr_base, soc)
-        .map(|s| s.cpuclusters.into_iter().map(|c| c.name).collect())
+        .map(|(s, _)| s.cpuclusters.into_iter().map(|c| c.name).collect())
         .unwrap_or_default()
 }
 
-fn find_soc(zephyr_base: &Path, soc: &str) -> Option<SocEntry> {
-    files_named(&zephyr_base.join("soc"), "soc.yml")
+/// The SoC's soc.yml entry and the vendor directory holding it (`soc/<dir>/...`).
+fn find_soc(zephyr_base: &Path, soc: &str) -> Option<(SocEntry, String)> {
+    let soc_root = zephyr_base.join("soc");
+    files_named(&soc_root, "soc.yml")
         .into_iter()
-        .filter_map(|path| fs::read_to_string(path).ok())
-        .filter_map(|text| serde_yaml_ng::from_str::<SocFile>(&text).ok())
-        .flat_map(SocFile::into_socs)
-        .find(|s| s.name == soc)
+        .filter_map(|path| {
+            let text = fs::read_to_string(&path).ok()?;
+            let file = serde_yaml_ng::from_str::<SocFile>(&text).ok()?;
+            let dir = path.strip_prefix(&soc_root).ok()?.components().next()?;
+            let dir = dir.as_os_str().to_string_lossy().into_owned();
+            Some(file.into_socs().map(move |s| (s, dir.clone())))
+        })
+        .flatten()
+        .find(|(s, _)| s.name == soc)
 }
 
 /// All `west build -b` targets the board offers for `soc`.
@@ -145,7 +194,12 @@ pub fn valid_targets(board: &BoardEntry, soc: &BoardSoc, clusters: &[String]) ->
     let base = format!("{}/{}", board.name, soc.name);
     let mut targets = Vec::new();
     if clusters.is_empty() {
-        targets.push(board.name.clone());
+        // The bare name only picks a SoC when the board has one.
+        targets.push(if board.socs.len() == 1 {
+            board.name.clone()
+        } else {
+            base.clone()
+        });
         targets.extend(
             soc.variants
                 .iter()
@@ -223,12 +277,21 @@ pub fn resolve(
                 }
             },
         };
-    let (vendor, info) = vendor::find_soc(&soc.name).ok_or_else(|| BoardError::UnsupportedSoc {
+    // The vendor is whoever owns the soc/<dir>/ that defines the SoC; the profile's SoC
+    // table only adds exceptions.
+    let (soc_entry, soc_dir) =
+        find_soc(zephyr_base, &soc.name).ok_or_else(|| BoardError::NotInZephyr {
+            board: format!("{}/{}", board.name, soc.name),
+            version: zephyr_version.to_string(),
+        })?;
+    let vendor = vendor::by_soc_dir(&soc_dir).ok_or_else(|| BoardError::UnsupportedSoc {
         board: input.trim().to_string(),
         soc: soc.name.clone(),
-        supported: vendor::supported_socs(),
+        soc_dir: soc_dir.clone(),
+        supported: vendor::supported(),
     })?;
-    let clusters = soc_cpuclusters(zephyr_base, &soc.name);
+    let info = vendor.soc(&soc.name);
+    let clusters: Vec<String> = soc_entry.cpuclusters.into_iter().map(|c| c.name).collect();
     let valid = valid_targets(&board, soc, &clusters);
 
     let is_valid = |id: &BoardId| {
@@ -241,7 +304,8 @@ pub fn resolve(
     let target = if is_valid(&id) {
         id.clone()
     } else if let Some(cluster) =
-        default_cluster(&clusters, info.default_cpucluster).filter(|_| id.qualifiers.len() <= 1)
+        default_cluster(&clusters, info.and_then(|i| i.default_cpucluster))
+            .filter(|_| id.qualifiers.len() <= 1)
     {
         id.with_qualifiers(&format!("{}/{cluster}", soc.name))
     } else {
@@ -251,13 +315,29 @@ pub fn resolve(
         });
     };
 
+    let mut plain = target.clone();
+    plain.revision = None;
+    let found_arch = twister_arch(&board, &soc.name, &plain.to_string()).or(info.map(|i| i.arch));
+    let arch = match (found_arch, arch_override) {
+        (Some(arch), requested) => {
+            check_arch(requested, &soc.name, arch)?;
+            arch
+        }
+        (None, Some(requested)) => requested,
+        (None, None) => {
+            return Err(BoardError::UnknownArch {
+                board: target.to_string(),
+            });
+        }
+    };
     build(
         input,
         &target,
         vendor,
-        info,
+        &soc.name,
+        arch,
+        info.and_then(|i| i.toolchain),
         ResolutionSource::BoardYml,
-        arch_override,
     )
 }
 
@@ -446,5 +526,98 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn resolves_unlisted_socs_of_a_supported_vendor() {
+        let tree = fixtures::zephyr_tree();
+        // esp32c5 is not in the espressif profile: vendor from soc/espressif, arch from
+        // twister, toolchain from the architecture.
+        let t = check(tree.path(), "esp32c5_devkitc/esp32c5/hpcore").unwrap();
+        assert_eq!(t.vendor.id, "espressif");
+        assert_eq!(t.arch, Arch::Riscv);
+        assert_eq!(t.toolchains, ["riscv64-zephyr-elf"]);
+        // Two clusters and no profile default: the user has to pick one.
+        assert!(matches!(
+            check(tree.path(), "esp32c5_devkitc"),
+            Err(BoardError::InvalidTarget { .. })
+        ));
+    }
+
+    #[test]
+    fn needs_an_arch_when_twister_and_tables_have_none() {
+        let tree = fixtures::zephyr_tree();
+        assert!(matches!(
+            check(tree.path(), "esp32c5_devkitc/esp32c5/lpcore"),
+            Err(BoardError::UnknownArch { .. })
+        ));
+        let t = resolve(
+            tree.path(),
+            "esp32c5_devkitc/esp32c5/lpcore",
+            Some(Arch::Riscv),
+            "v4.2.0",
+        )
+        .unwrap();
+        assert_eq!(t.toolchains, ["riscv64-zephyr-elf"]);
+    }
+
+    #[test]
+    fn reads_twister_arch_with_or_without_the_soc() {
+        let tree = fixtures::zephyr_tree();
+        let arch = |board: &str, soc: &str, target: &str| {
+            twister_arch(&find_board(tree.path(), board).unwrap(), soc, target)
+        };
+        assert_eq!(
+            arch("esp32c3_devkitm", "esp32c3", "esp32c3_devkitm"),
+            Some(Arch::Riscv)
+        );
+        assert_eq!(
+            arch("esp32c3_devkitm", "esp32c3", "esp32c3_devkitm/esp32c3"),
+            Some(Arch::Riscv)
+        );
+        assert_eq!(
+            arch(
+                "esp32s3_devkitc",
+                "esp32s3",
+                "esp32s3_devkitc/esp32s3/procpu"
+            ),
+            Some(Arch::Xtensa)
+        );
+        assert_eq!(
+            arch(
+                "esp32s3_devkitc",
+                "esp32s3",
+                "esp32s3_devkitc/esp32s3/appcpu"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn names_the_soc_dir_of_unsupported_vendors() {
+        let tree = fixtures::zephyr_tree();
+        match check(tree.path(), "nucleo_f401re") {
+            Err(BoardError::UnsupportedSoc { soc_dir, .. }) => assert_eq!(soc_dir, "st"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn multi_soc_boards_list_qualified_targets() {
+        let tree = fixtures::zephyr_tree();
+        let base = tree.path();
+        match check(base, "dual_soc_board") {
+            Err(BoardError::InvalidTarget { valid, .. }) => {
+                assert_eq!(
+                    valid,
+                    "dual_soc_board/esp32c3, dual_soc_board/esp32c6/hpcore, dual_soc_board/esp32c6/lpcore"
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            check(base, "dual_soc_board/esp32c3").unwrap().soc.as_str(),
+            "esp32c3"
+        );
     }
 }

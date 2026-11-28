@@ -102,14 +102,20 @@ fn init_requires_board_when_not_interactive() {
 }
 
 #[test]
-fn init_rejects_unsupported_socs_and_old_zephyr() {
+fn init_leaves_unknown_socs_to_sync() {
+    // The tree decides whether the SoC's vendor is supported; init only says so.
     let sb = Sandbox::new();
     sb.zem()
         .args(["init", "--yes", "--board", "nrf52840dk/nrf52840"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("does not support yet"))
-        .stderr(predicate::str::contains("supported SoCs: esp32,"));
+        .success()
+        .stdout(predicate::str::contains("looked up in the Zephyr tree"))
+        .stdout(predicate::str::contains("espressif (soc/espressif)"));
+}
+
+#[test]
+fn init_rejects_old_zephyr() {
+    let sb = Sandbox::new();
     sb.zem()
         .args([
             "init",
