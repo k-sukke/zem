@@ -162,6 +162,16 @@ pub fn find_board(name: &str) -> Option<(&'static VendorProfile, &'static KnownB
         .find_map(|v| v.boards.iter().find(|b| b.name == name).map(|b| (*v, b)))
 }
 
+/// Every SoC zem knows, for error messages (`esp32, esp32s2, ...`).
+pub fn supported_socs() -> String {
+    VENDORS
+        .iter()
+        .flat_map(|v| v.socs)
+        .map(|s| s.name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub fn known_boards() -> impl Iterator<Item = &'static KnownBoard> {
     VENDORS.iter().flat_map(|v| v.boards)
 }

@@ -206,7 +206,7 @@ pub struct EnvConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Isolation {
-    /// Remove known conflicting variables (ESP-IDF, other Zephyr setups, Python envs).
+    /// Remove known conflicting variables (vendor SDKs such as ESP-IDF, other Zephyr setups, Python envs).
     #[default]
     Denylist,
     /// Keep only a small per-OS allowlist, PATH and `[env].passthrough`.

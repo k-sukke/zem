@@ -102,13 +102,14 @@ fn init_requires_board_when_not_interactive() {
 }
 
 #[test]
-fn init_rejects_non_esp_boards_and_old_zephyr() {
+fn init_rejects_unsupported_socs_and_old_zephyr() {
     let sb = Sandbox::new();
     sb.zem()
         .args(["init", "--yes", "--board", "nrf52840dk/nrf52840"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not an ESP32-series SoC"));
+        .stderr(predicate::str::contains("does not support yet"))
+        .stderr(predicate::str::contains("supported SoCs: esp32,"));
     sb.zem()
         .args([
             "init",

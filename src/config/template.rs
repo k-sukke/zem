@@ -25,13 +25,13 @@ board = {board}
 
 [modules]
 # Optional features: mbedtls, lvgl, littlefs, mcuboot, segger.
-# hal_espressif is added automatically for ESP32 targets.
+# The target's HAL module (e.g. hal_espressif) is added automatically.
 features = [{features}]
 # Additional west project names from Zephyr's west.yml.
 extra = []
 
 [blobs]
-# Set to true to accept the Espressif binary blob licenses non-interactively.
+# Set to true to accept the vendor's binary blob licenses non-interactively.
 accept_licenses = false
 
 [python]

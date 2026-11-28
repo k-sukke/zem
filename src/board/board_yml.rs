@@ -18,6 +18,8 @@ struct BoardFile {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BoardEntry {
     pub name: String,
+    /// Vendor prefix (`espressif`, `nordic`, ...); some board.yml files omit it.
+    pub vendor: Option<String>,
     #[serde(default)]
     pub socs: Vec<BoardSoc>,
 }
@@ -67,7 +69,7 @@ struct Named {
 
 pub fn find_board(zephyr_base: &Path, name: &str) -> Option<BoardEntry> {
     let needle = format!("name: {name}");
-    board_files(&zephyr_base.join("boards"))
+    files_named(&zephyr_base.join("boards"), "board.yml")
         .into_iter()
         .filter_map(|path| fs::read_to_string(path).ok())
         .filter(|text| {
@@ -79,7 +81,7 @@ pub fn find_board(zephyr_base: &Path, name: &str) -> Option<BoardEntry> {
         .find(|b| b.name == name)
 }
 
-fn board_files(dir: &Path) -> Vec<PathBuf> {
+fn files_named(dir: &Path, file_name: &str) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -90,7 +92,7 @@ fn board_files(dir: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.file_name().is_some_and(|n| n == "board.yml") {
+            } else if path.file_name().is_some_and(|n| n == file_name) {
                 found.push(path);
             }
         }
@@ -98,16 +100,14 @@ fn board_files(dir: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// CPU clusters of `soc`, from whichever `soc/**/soc.yml` defines it (vendors keep it at
+/// different depths, e.g. `soc/espressif/soc.yml` and `soc/st/stm32/soc.yml`).
 pub fn soc_cpuclusters(zephyr_base: &Path, soc: &str) -> Vec<String> {
-    let path = zephyr_base.join("soc").join("espressif").join("soc.yml");
-    let Some(file) = fs::read_to_string(path)
-        .ok()
-        .and_then(|t| serde_yaml_ng::from_str::<SocFile>(&t).ok())
-    else {
-        return Vec::new();
-    };
-    file.family
+    files_named(&zephyr_base.join("soc"), "soc.yml")
         .into_iter()
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .filter_map(|text| serde_yaml_ng::from_str::<SocFile>(&text).ok())
+        .flat_map(|f| f.family)
         .flat_map(|f| f.series)
         .flat_map(|s| s.socs)
         .find(|s| s.name == soc)
@@ -187,82 +187,96 @@ pub fn verify(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::fixtures;
     use crate::board::resolve_static;
-
-    fn fixture() -> tempfile::TempDir {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let write = |rel: &str, text: &str| {
-            let path = base.join(rel);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, text).unwrap();
-        };
-        write(
-            "boards/espressif/esp32s3_devkitc/board.yml",
-            "board:\n  name: esp32s3_devkitc\n  vendor: espressif\n  socs:\n  - name: esp32s3\n",
-        );
-        write(
-            "boards/espressif/esp32c3_devkitm/board.yml",
-            "board:\n  name: esp32c3_devkitm\n  socs:\n  - name: esp32c3\n",
-        );
-        write(
-            "boards/seeed/xiao_esp32s3/board.yml",
-            "board:\n  name: xiao_esp32s3\n  socs:\n  - name: esp32s3\n    variants:\n    - name: 'sense'\n      cpucluster: 'procpu'\n",
-        );
-        write(
-            "boards/other/multi/board.yml",
-            "boards:\n- name: some_other_board\n  socs:\n  - name: foo\n",
-        );
-        write(
-            "soc/espressif/soc.yml",
-            "family:\n- name: espressif_esp32\n  series:\n  - name: esp32s3\n    socs:\n    - name: esp32s3\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32c3\n    socs:\n    - name: esp32c3\n",
-        );
-        tmp
-    }
 
     fn check(base: &Path, board: &str) -> Result<(), BoardError> {
         verify(base, &resolve_static(board, None).unwrap(), "v4.2.0")
     }
 
+    /// All `west build -b` targets of `board` on its first SoC, as the tree describes them.
+    fn targets(base: &Path, board: &str) -> Vec<String> {
+        let entry = find_board(base, board).unwrap();
+        let clusters = soc_cpuclusters(base, &entry.socs[0].name);
+        valid_targets(&entry, &entry.socs[0], &clusters)
+    }
+
     #[test]
     fn accepts_valid_targets() {
-        let tmp = fixture();
-        check(tmp.path(), "esp32s3_devkitc/esp32s3/procpu").unwrap();
-        check(tmp.path(), "esp32s3_devkitc/esp32s3/appcpu").unwrap();
-        check(tmp.path(), "esp32c3_devkitm").unwrap();
-        check(tmp.path(), "esp32c3_devkitm/esp32c3").unwrap();
-        check(tmp.path(), "xiao_esp32s3/esp32s3/procpu/sense").unwrap();
+        let tree = fixtures::zephyr_tree();
+        check(tree.path(), "esp32s3_devkitc/esp32s3/procpu").unwrap();
+        check(tree.path(), "esp32s3_devkitc/esp32s3/appcpu").unwrap();
+        check(tree.path(), "esp32c3_devkitm").unwrap();
+        check(tree.path(), "esp32c3_devkitm/esp32c3").unwrap();
+        check(tree.path(), "xiao_esp32s3/esp32s3/procpu/sense").unwrap();
     }
 
     #[test]
     fn rejects_missing_cpucluster_and_unknown_boards() {
-        let tmp = fixture();
+        let tree = fixtures::zephyr_tree();
         assert!(matches!(
-            check(tmp.path(), "esp32s3_devkitc/esp32s3"),
+            check(tree.path(), "esp32s3_devkitc/esp32s3"),
             Err(BoardError::InvalidTarget { .. })
         ));
         assert!(matches!(
-            check(tmp.path(), "esp32s3_devkitc/esp32s3/lpcore"),
+            check(tree.path(), "esp32s3_devkitc/esp32s3/lpcore"),
             Err(BoardError::InvalidTarget { .. })
         ));
         assert!(matches!(
-            check(tmp.path(), "esp32h2_devkitm"),
+            check(tree.path(), "esp32h2_devkitm"),
             Err(BoardError::NotInZephyr { .. })
         ));
     }
 
     #[test]
     fn lists_valid_targets_with_variants() {
-        let tmp = fixture();
-        let board = find_board(tmp.path(), "xiao_esp32s3").unwrap();
-        let clusters = soc_cpuclusters(tmp.path(), "esp32s3");
+        let tree = fixtures::zephyr_tree();
         assert_eq!(
-            valid_targets(&board, &board.socs[0], &clusters),
+            targets(tree.path(), "xiao_esp32s3"),
             [
                 "xiao_esp32s3/esp32s3/procpu",
                 "xiao_esp32s3/esp32s3/procpu/sense",
                 "xiao_esp32s3/esp32s3/appcpu"
             ]
         );
+    }
+
+    #[test]
+    fn reads_boards_of_other_vendors() {
+        let tree = fixtures::zephyr_tree();
+        let base = tree.path();
+        // Multi-core SoC with a variant on one cluster only.
+        assert_eq!(
+            targets(base, "nrf5340dk"),
+            [
+                "nrf5340dk/nrf5340/cpuapp",
+                "nrf5340dk/nrf5340/cpuapp/ns",
+                "nrf5340dk/nrf5340/cpunet"
+            ]
+        );
+        // soc.yml one level deeper (soc/st/stm32/), and a board name that does not name its SoC.
+        assert_eq!(targets(base, "nucleo_f401re"), ["nucleo_f401re"]);
+        assert_eq!(
+            find_board(base, "nucleo_f401re").unwrap().socs[0].name,
+            "stm32f401xe"
+        );
+        assert_eq!(targets(base, "rpi_pico"), ["rpi_pico"]);
+        assert_eq!(
+            targets(base, "native_sim"),
+            ["native_sim", "native_sim/native/64"]
+        );
+    }
+
+    #[test]
+    fn reads_vendor_and_multi_board_files() {
+        let tree = fixtures::zephyr_tree();
+        let base = tree.path();
+        assert_eq!(
+            find_board(base, "nrf5340dk").unwrap().vendor.as_deref(),
+            Some("nordic")
+        );
+        assert_eq!(find_board(base, "esp32c3_devkitm").unwrap().vendor, None);
+        assert!(find_board(base, "some_other_board").is_some());
+        assert!(find_board(base, "missing_board").is_none());
     }
 }

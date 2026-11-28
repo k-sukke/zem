@@ -82,8 +82,8 @@ impl EnvBuilder {
         }
     }
 
-    /// Drop variables from other Zephyr/ESP-IDF/Python setups and their PATH entries. In
-    /// strict mode, also drop everything outside the platform allowlist.
+    /// Drop variables from vendor SDKs (ESP-IDF, ...), other Zephyr and Python setups and their
+    /// PATH entries. In strict mode, also drop everything outside the platform allowlist.
     pub fn sanitize(&mut self, passthrough: &[String], isolation: Isolation) {
         let foreign_prefixes: Vec<PathBuf> = ["VIRTUAL_ENV", "CONDA_PREFIX"]
             .iter()
