@@ -1,5 +1,4 @@
 pub mod board_yml;
-mod espressif;
 mod qualifier;
 mod resolve;
 mod soc;
@@ -10,14 +9,13 @@ use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use espressif::{KNOWN_BOARDS, KnownBoard, known_board};
 pub use qualifier::BoardId;
 pub use resolve::{ResolutionSource, ResolvedTarget, resolve_static};
 pub use soc::SocId;
 
 /// Latest Zephyr release (major, minor) known to lack `soc` entirely, if any.
 pub fn soc_absent_through(soc: &SocId) -> Option<(u32, u32)> {
-    espressif::soc_info(soc.as_str()).and_then(|info| info.absent_through)
+    crate::vendor::find_soc(soc.as_str()).and_then(|(_, info)| info.absent_through)
 }
 
 /// CPU architecture, one per directory under Zephyr's `arch/` (v4.0 and later).

@@ -351,6 +351,7 @@ fn run_steps(
         zem_home: home.root().to_path_buf(),
         target: TargetState {
             board: target.board.clone(),
+            vendor: target.vendor.id.to_string(),
             soc: target.soc.to_string(),
             arch: target.arch,
             toolchains: target.toolchains.clone(),

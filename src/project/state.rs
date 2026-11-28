@@ -33,6 +33,7 @@ pub struct ProjectState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetState {
     pub board: String,
+    pub vendor: String,
     pub soc: String,
     pub arch: Arch,
     pub toolchains: Vec<String>,
@@ -97,6 +98,7 @@ mod tests {
             zem_home: home.root().to_path_buf(),
             target: TargetState {
                 board: "esp32c3_devkitm".into(),
+                vendor: "espressif".into(),
                 soc: "esp32c3".into(),
                 arch: Arch::Riscv,
                 toolchains: vec!["riscv64-zephyr-elf".into()],

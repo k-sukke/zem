@@ -6,16 +6,13 @@ use crate::home::ZemHome;
 use crate::platform::{self, Os, SerialAccess};
 use crate::store::uv::UV_VERSION;
 use crate::tools::{self, MIN_CMAKE, Probe, ToolSpec};
-use crate::{serial, session, sync};
+use crate::{serial, session, sync, vendor};
 
+/// Besides these, every vendor profile adds the notable variables of its own SDK.
 const CONFLICTING_VARS: &[&str] = &[
-    "IDF_PATH",
-    "IDF_TOOLS_PATH",
-    "IDF_PYTHON_ENV_PATH",
     "ZEPHYR_BASE",
     "ZEPHYR_SDK_INSTALL_DIR",
     "ZEPHYR_TOOLCHAIN_VARIANT",
-    "ESPRESSIF_TOOLCHAIN_PATH",
     "VIRTUAL_ENV",
     "CONDA_PREFIX",
     "PYTHONPATH",
@@ -221,9 +218,8 @@ fn build_tool_checks(install_cmake_ninja: bool) -> Vec<Check> {
 
 fn environment_checks() -> Vec<Check> {
     let mut checks = Vec::new();
-    let present: Vec<&str> = CONFLICTING_VARS
-        .iter()
-        .copied()
+    let present: Vec<&str> = vendor::notable_env_vars()
+        .chain(CONFLICTING_VARS.iter().copied())
         .filter(|name| std::env::var_os(name).is_some_and(|v| !v.is_empty()))
         .collect();
     checks.push(if present.is_empty() {

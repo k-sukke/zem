@@ -405,6 +405,7 @@ mod synced {
             "zem_home": home,
             "target": {
                 "board": "esp32c3_devkitm",
+                "vendor": "espressif",
                 "soc": "esp32c3",
                 "arch": "riscv",
                 "toolchains": ["riscv64-zephyr-elf"],

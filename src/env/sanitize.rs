@@ -2,17 +2,16 @@ use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
 use crate::platform;
+use crate::vendor;
 
-pub const DENY_PREFIXES: &[&str] = &["IDF_", "ZEPHYR_", "CONDA_", "PIP_", "UV_", "WEST_CONFIG_"];
+/// Besides these, every vendor profile adds the variables of its own SDK (`crate::vendor`).
+pub const DENY_PREFIXES: &[&str] = &["ZEPHYR_", "CONDA_", "PIP_", "UV_", "WEST_CONFIG_"];
 
 pub const DENY_EXACT: &[&str] = &[
     "VIRTUAL_ENV",
     "PYTHONPATH",
     "PYTHONHOME",
-    "ESP_IDF_VERSION",
-    "ESP_ROM_ELF_DIR",
     "OPENOCD_SCRIPTS",
-    "ESPRESSIF_TOOLCHAIN_PATH",
     "GNUARMEMB_TOOLCHAIN_PATH",
     "CROSS_COMPILE",
 ];
@@ -22,7 +21,16 @@ pub fn is_denied(key: &OsStr) -> bool {
         return false;
     };
     let upper = key.to_ascii_uppercase();
-    DENY_EXACT.contains(&upper.as_str()) || DENY_PREFIXES.iter().any(|p| upper.starts_with(p))
+    DENY_EXACT
+        .iter()
+        .copied()
+        .chain(vendor::env_vars())
+        .any(|v| v == upper)
+        || DENY_PREFIXES
+            .iter()
+            .copied()
+            .chain(vendor::env_prefixes())
+            .any(|p| upper.starts_with(p))
 }
 
 /// Kept in `[env].isolation = "strict"` mode (besides PATH and `[env].passthrough`).
@@ -41,7 +49,8 @@ pub fn is_strict_allowed(key: &OsStr) -> bool {
         })
 }
 
-/// PATH entries that belong to ESP-IDF, another Zephyr SDK, or a foreign virtualenv/conda env.
+/// PATH entries that belong to a vendor SDK (ESP-IDF, ...), another Zephyr SDK, or a foreign
+/// virtualenv/conda env.
 pub fn is_polluting_path_entry(entry: &Path, foreign_prefixes: &[PathBuf]) -> bool {
     if foreign_prefixes
         .iter()
@@ -52,7 +61,7 @@ pub fn is_polluting_path_entry(entry: &Path, foreign_prefixes: &[PathBuf]) -> bo
     entry.components().any(|c| match c {
         Component::Normal(name) => {
             let name = name.to_string_lossy().to_ascii_lowercase();
-            name == ".espressif" || name.starts_with("esp-idf") || name.starts_with("zephyr-sdk-")
+            name.starts_with("zephyr-sdk-") || vendor::is_vendor_path_component(&name)
         }
         _ => false,
     })
