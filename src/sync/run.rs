@@ -269,9 +269,7 @@ fn run_steps(
     target.source = ResolutionSource::BoardYml;
     steps.done(format!(
         "{} ({} / {})",
-        target.board,
-        target.soc.name(),
-        target.arch
+        target.board, target.soc, target.arch
     ));
 
     steps.begin("Python requirements");
@@ -353,9 +351,9 @@ fn run_steps(
         zem_home: home.root().to_path_buf(),
         target: TargetState {
             board: target.board.clone(),
-            soc: target.soc.name().to_string(),
+            soc: target.soc.to_string(),
             arch: target.arch,
-            toolchains: target.toolchains.iter().map(|s| s.to_string()).collect(),
+            toolchains: target.toolchains.clone(),
             source: target.source,
         },
         workspace: StoreRef {

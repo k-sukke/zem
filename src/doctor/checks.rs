@@ -345,12 +345,7 @@ fn project_checks(project: crate::Result<LoadedConfig>) -> Vec<Check> {
             checks.push(Check::new(
                 Status::Ok,
                 "target",
-                format!(
-                    "{} / {} → {}",
-                    t.soc.name(),
-                    t.arch,
-                    t.toolchains.join(", ")
-                ),
+                format!("{} / {} → {}", t.soc, t.arch, t.toolchains.join(", ")),
             ));
             for warning in &plan.warnings {
                 checks.push(Check::new(Status::Warn, "config", warning.clone()));

@@ -151,7 +151,7 @@ pub fn verify(
         board: id.name.clone(),
         version: zephyr_version.to_string(),
     })?;
-    let soc_name = target.soc.name();
+    let soc_name = target.soc.as_str();
     let soc = board
         .socs
         .iter()

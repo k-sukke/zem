@@ -174,9 +174,9 @@ impl WorkspaceStore<'_> {
 
     /// Fetch binary blobs for `modules` that have not been fetched yet. Callers must hold the
     /// workspace lock.
-    pub fn ensure_blobs(
+    pub fn ensure_blobs<S: AsRef<str>>(
         &self,
-        modules: &[&str],
+        modules: &[S],
         accept_licenses: bool,
         force: bool,
     ) -> Result<Vec<String>> {
@@ -186,7 +186,7 @@ impl WorkspaceStore<'_> {
         })?;
         let pending: Vec<&str> = modules
             .iter()
-            .copied()
+            .map(AsRef::as_ref)
             .filter(|m| force || !marker.blobs_fetched.contains(*m))
             .collect();
         for module in &pending {

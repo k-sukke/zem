@@ -2,6 +2,7 @@ pub mod board_yml;
 mod espressif;
 mod qualifier;
 mod resolve;
+mod soc;
 
 use std::fmt;
 
@@ -9,22 +10,45 @@ use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use espressif::{KNOWN_BOARDS, KnownBoard, Soc, known_board};
+pub use espressif::{KNOWN_BOARDS, KnownBoard, known_board};
 pub use qualifier::BoardId;
 pub use resolve::{ResolutionSource, ResolvedTarget, resolve_static};
+pub use soc::SocId;
 
+/// Latest Zephyr release (major, minor) known to lack `soc` entirely, if any.
+pub fn soc_absent_through(soc: &SocId) -> Option<(u32, u32)> {
+    espressif::soc_info(soc.as_str()).and_then(|info| info.absent_through)
+}
+
+/// CPU architecture, one per directory under Zephyr's `arch/` (v4.0 and later).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Arch {
-    Xtensa,
+    Arc,
+    Arm,
+    Arm64,
+    Mips,
+    Posix,
     Riscv,
+    Rx,
+    Sparc,
+    X86,
+    Xtensa,
 }
 
 impl Arch {
     pub fn as_str(self) -> &'static str {
         match self {
-            Arch::Xtensa => "xtensa",
+            Arch::Arc => "arc",
+            Arch::Arm => "arm",
+            Arch::Arm64 => "arm64",
+            Arch::Mips => "mips",
+            Arch::Posix => "posix",
             Arch::Riscv => "riscv",
+            Arch::Rx => "rx",
+            Arch::Sparc => "sparc",
+            Arch::X86 => "x86",
+            Arch::Xtensa => "xtensa",
         }
     }
 }
@@ -67,7 +91,7 @@ pub enum BoardError {
     #[diagnostic(code(zem::board::soc_mismatch))]
     SocMismatch {
         board: String,
-        expected: &'static str,
+        expected: String,
         actual: String,
     },
 
@@ -99,7 +123,24 @@ pub enum BoardError {
     )]
     ArchMismatch {
         requested: Arch,
-        soc: &'static str,
+        soc: String,
         actual: Arch,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arch_serde_matches_zephyr_arch_dirs() {
+        for name in [
+            "arc", "arm", "arm64", "mips", "posix", "riscv", "rx", "sparc", "x86", "xtensa",
+        ] {
+            let arch: Arch = serde_json::from_value(serde_json::json!(name)).unwrap();
+            assert_eq!(arch.as_str(), name);
+            assert_eq!(serde_json::to_value(arch).unwrap(), name);
+        }
+        assert!(serde_json::from_value::<Arch>(serde_json::json!("avr")).is_err());
+    }
 }
