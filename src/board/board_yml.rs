@@ -435,12 +435,15 @@ mod tests {
     #[test]
     fn profile_defaults_exist_in_the_tree() {
         let tree = fixtures::zephyr_tree();
+        // Every default must be one of the SoC's clusters (the fixture mirrors v4.2.0).
         for soc in crate::vendor::VENDORS.iter().flat_map(|v| v.socs) {
-            if let Some(cluster) = soc.default_cpucluster
-                && let Some(clusters) = Some(soc_cpuclusters(tree.path(), soc.name))
-                && !clusters.is_empty()
-            {
-                assert!(clusters.iter().any(|c| c == cluster), "{}", soc.name);
+            if let Some(cluster) = soc.default_cpucluster {
+                let clusters = soc_cpuclusters(tree.path(), soc.name);
+                assert!(
+                    clusters.iter().any(|c| c == cluster),
+                    "{}: {clusters:?}",
+                    soc.name
+                );
             }
         }
     }

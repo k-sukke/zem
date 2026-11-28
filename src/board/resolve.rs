@@ -74,11 +74,9 @@ pub fn resolve_static(
                 with_defaults(&id, soc),
             )
         } else if let Some(found) = vendor::soc_from_board_prefix(&id.name) {
-            (
-                found,
-                ResolutionSource::Heuristic,
-                with_defaults(&id, found.1),
-            )
+            // Only a guess: keep the name as written and let the tree add qualifiers, so
+            // `zem init` does not write guessed qualifiers into zem.toml.
+            (found, ResolutionSource::Heuristic, id.clone())
         } else {
             return Ok(None);
         };
@@ -204,5 +202,15 @@ mod tests {
             resolve_static("esp32c3_devkitm", Some(Arch::Xtensa)),
             Err(BoardError::ArchMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn guessed_socs_keep_the_name_as_written() {
+        let t = resolve("esp32s3_custom");
+        assert_eq!(t.source, ResolutionSource::Heuristic);
+        assert_eq!(
+            (t.board.as_str(), t.normalized_from),
+            ("esp32s3_custom", None)
+        );
     }
 }
