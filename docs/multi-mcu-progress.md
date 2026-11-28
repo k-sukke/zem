@@ -5,20 +5,31 @@
 
 ---
 
-## 1. 現在地
+## 1. 現在地（v0.3.0 リリース時点）
 
-S1・S2・S8-1・S3 を実装し、PR #8〜#11 としてスタックで出した。**#8〜#11 は 2026-11-28 にマージ済み**（#8 は CodeRabbit のレビュー済み、#9〜#11 はセルフレビュー済み）。振り返りの結果は #12（base `main`）。
-#12 までマージ済み。目的（2 社目の MCU を足せる状態）に近い順として、**S4 → 2 社目（RP2040）→ アウトオブツリーのボード → S5** に並べ替えた（ユーザー合意）。S4 は S4a（ベンダー判定・ツールチェーン、#13）と S4b（SDK 1.x の `SdkLayout`）に分けた。以降の PR は**セルフレビュー → マージ**の流れで進める（ユーザー合意）。
+**他社 MCU を足すための土台は整った。** readiness.md の S1〜S3・S4a・S6〜S8-1 を #8〜#13 で実装し、すべて `main` にマージ済み。
+ベンダーは `src/vendor/` のプロファイル 1 つで表され、SoC・CPU アーキテクチャ・ツールチェーンは Zephyr のツリーから決まる。
+ここで区切って v0.3.0（minor）をリリースする。
+
+残る大きな課題は次の 2 つ（詳細は §8）。
+
+1. **自作ボード（製品の基板）の対応** — zem が Zephyr 本体のボードしか探さないため、製品の基板を独自のボード定義で扱えない。
+   大半の製品は評価ボードではないため、**他社 MCU より優先する**（ユーザー合意）。
+2. **他社 MCU の書き込み・モニターまで含めたツールチェーンの整備** — 2 社目のプロファイルと、ホスト側の書き込みツール（S5）。
+
+以降の PR は**セルフレビュー → マージ**の流れで進める（ユーザー合意）。
+
+すべてマージ済み。
 
 | PR | ブランチ | base | ステップ | 内容 |
 |---|---|---|---|---|
-| [#7](https://github.com/k-sukke/zem/pull/7) | `docs/multi-mcu-readiness` | `main` | — | 計画の文書化、`PLAN.md` → `docs/mvp-plan.md`（**マージ済み**） |
+| [#7](https://github.com/k-sukke/zem/pull/7) | `docs/multi-mcu-readiness` | `main` | — | 計画の文書化、`PLAN.md` → `docs/mvp-plan.md` |
 | [#8](https://github.com/k-sukke/zem/pull/8) | `refactor/vendor-neutral-target-types` | `main` | S1 | `Soc` enum → `SocId` newtype、`Arch` を Zephyr の全アーキテクチャに拡張、`ResolvedTarget` を所有文字列に |
 | [#9](https://github.com/k-sukke/zem/pull/9) | `refactor/vendor-profile` | #8 | S2 + S6 | `src/vendor/` と `VendorProfile` を新設し、ESP32 固有の値（SoC・既知ボード・HAL・blobs・除外する環境変数と PATH・USB ID）を移動。`state.json` に `target.vendor` |
 | [#10](https://github.com/k-sukke/zem/pull/10) | `refactor/vendor-neutral-wording` | #9 | S8-1 | 複数ベンダーの偽 Zephyr ツリー（`src/board/fixtures.rs`）、`soc/**/soc.yml` の探索、`board.yml` の `vendor`、エラー文言とテンプレートの一般化 |
 | [#11](https://github.com/k-sukke/zem/pull/11) | `feat/tree-board-resolution` | #10 | S3 | 名前から SoC が分からないボードを sync 時にツリーから解決する 2 段 sync、CPU クラスタの補完、`absent_through` の削除、モジュールが空のときの `west.yml` の修正 |
 | [#12](https://github.com/k-sukke/zem/pull/12) | `feat/default-cpucluster` | `main` | 振り返り 2〜4 | 既定クラスタを `SocInfo.default_cpucluster` に一本化（`KnownBoard.default_qualifiers` を削除）、未対応 SoC の案内、E2E の ZEM_HOME 作成漏れの修正 |
-| #13 | `feat/arch-toolchains` | `main` | S4a | ベンダーを `soc/<dir>` で判定、アーキテクチャを twister から取得、ツールチェーンをアーキテクチャの既定値から決定。プロファイルに全 SoC を列挙しなくてよくなった |
+| [#13](https://github.com/k-sukke/zem/pull/13) | `feat/arch-toolchains` | `main` | S4a | ベンダーを `soc/<dir>` で判定、アーキテクチャを twister から取得、ツールチェーンをアーキテクチャの既定値から決定。プロファイルに全 SoC を列挙しなくてよくなった |
 
 **マージ手順（スタック）**: 下の PR からマージする。**次の PR の base を先に手動で `main` に付け替える**こと（`gh pr edit <n> --base main`）。
 このリポジトリはマージ後に head ブランチを自動削除する設定で、付け替え前に base ブランチが消えると次の PR が自動で閉じられる（#10 で発生。base ブランチを元のコミットで作り直して再オープンし、復旧した）。
@@ -140,10 +151,46 @@ CodeRabbit がレビューしないため、#8 から順にセルフレビュー
 
 ## 7. 次の作業
 
-目的（2 社目の MCU をプロファイル 1 つで足せる状態）に近い順。
+1. v0.3.0 をリリースする（`cargo release minor`）。
+2. **課題 1: 自作ボードの対応**（§8.1）。
+3. **課題 2: 他社 MCU の書き込み・モニターを含むツールチェーン**（§8.2）。2 社目は RP2040 が最有力。
+4. S4b: SDK のバージョンごとの配置（`SdkLayout`）。Zephyr v4.2 は SDK 0.17.2 なので、対応する Zephyr を上げるときに SDK 1.x の実物で確認してから。
 
-1. ~~S4a: ベンダー判定とツールチェーン（#13）~~ 対応済み。
-2. **2 社目のプロファイル（RP2040）**: ビルドまで。合わせて E2E のビルドマトリクスとサポート Tier（readiness.md S8-3・S8-4）、実ツリー照合テスト（S8-2）。
-3. アウトオブツリーのボードの探索（§5 の 6。アプリの `boards/`、モジュールの `board_root`）。
-4. S5: 他社ボードへの書き込み（doctor の Flash セクション、pip で入るランナー）。
-5. S4b: SDK のバージョンごとの配置（`SdkLayout`）。Zephyr v4.2 は SDK 0.17.2 なので、対応 Zephyr を上げるときに SDK 1.x の実物で確認してから。
+## 8. 残る課題
+
+### 8.1 自作ボード（製品の基板）の対応
+
+**何が困るか**: Zephyr では、アプリの隣（`boards/<vendor>/<board>/board.yml` と devicetree など）やモジュールの `board_root` に
+独自のボードを定義でき、`west build` はそれを見つける。一方 `zem sync` は Board ステップで `zephyr/boards` しか探さないため、
+「board ... does not exist in Zephyr」で止まる。
+
+既存の評価ボードに devicetree overlay（`boards/<board>.overlay` / `app.overlay`）と Kconfig を重ねれば、LED や SPI・CAN などのピンは変えられる。
+しかし、次のようなものは「評価ボード＋差分」として無理に表すことになり、製品の基板には向かない。
+
+| 場面 | overlay での扱い |
+|---|---|
+| モジュールが違う（フラッシュ容量・PSRAM など） | パーティションや Kconfig を上書きし続ける |
+| 評価ボードにある部品が製品の基板にない（ボタン・LED・USB 変換 IC など） | `/delete-node/` や `status = "disabled"` で 1 つずつ消す |
+| 書き込みの設定（`board.cmake`） | overlay では変えられない |
+| 複数のアプリ・製品で同じ基板を使う | overlay をアプリごとに複製する |
+| ファームウェアや MCUboot から見たボード名 | 評価ボードの名前のまま |
+
+**方針**: Board ステップのボード探索を、アプリの `boards/` → 有効なモジュールの `board_root` → `zephyr/boards` の順にする
+（`soc_root` も同様）。ボードの探索とクラスタ・アーキテクチャの決定は #11〜#13 の仕組みをそのまま使う。
+アプリ側のボードを使うとき、`west build` に `BOARD_ROOT` を渡す必要があるかを確認する（アプリのディレクトリは Zephyr の既定の `BOARD_ROOT` に入っている）。
+テストは、フィクスチャにアプリ側のボードとモジュール側のボードを足し、XIAO ESP32C3 を土台にした自作ボード定義で実機の書き込みまで確認する。
+
+### 8.2 他社 MCU の書き込み・モニターまで含めたツールチェーン
+
+**何が困るか**: ESP32 は、書き込み（esptool）とモニター（`west espressif monitor`）が `hal_espressif` に同梱されていて、zem はホスト側に何も用意しなくてよかった。
+他社の多くは、書き込みにホスト側のツール（J-Link、OpenOCD、pyOCD、picotool、nrfutil、STM32CubeProgrammer、LinkServer など）が必要で、一部はライセンス同意が要る。
+また、モニターは汎用のシリアルターミナルになり、`west espressif monitor` のような専用コマンドがない。
+
+**方針**（readiness.md S5 を具体化）:
+
+1. 2 社目のプロファイル（RP2040: HAL は `hal_rpi_pico`、Cortex-M のため Zephyr v4.2.0 では `cmsis_6` も必要。v4.0 に `cmsis_6` があるか要確認）でビルドまで通す。
+   合わせて実ツリー照合テスト（S8-2）、E2E のビルドマトリクスとサポート Tier（S8-3・S8-4）を入れる。
+2. 書き込みツールを「pip で入る（pyOCD など）」「zem が取得できる（picotool、OpenOCD など）」「案内だけ（J-Link など）」に分け、
+   doctor に Flash セクションを足す（ボードの `board.cmake` が挙げるランナーと、ホストで見つかったツールの突き合わせ）。
+3. モニター: `zem` が汎用のシリアルモニターを用意するか、`west` の拡張に任せるかを決める（pyserial の `miniterm` が venv にある）。
+4. strict モードで J-Link などが使う環境変数・PATH を通す仕組み（§6 の 9-5）。
