@@ -327,7 +327,7 @@ The settings are in [`release.toml`](release.toml); nothing is published to crat
 [cargo-dist](https://axodotdev.github.io/cargo-dist/), which builds the binaries, creates the GitHub Release, and
 publishes the Homebrew formula to [`k-sukke/homebrew-tap`](https://github.com/k-sukke/homebrew-tap).
 
-The design and per-phase notes are in [PLAN.md](PLAN.md) (Japanese).
+Design notes are in [`docs/`](docs/) (Japanese): the MVP design and per-phase notes in [`docs/mvp-plan.md`](docs/mvp-plan.md), and the plan for supporting more MCUs in [`docs/multi-mcu-readiness.md`](docs/multi-mcu-readiness.md).
 
 ## License
 
