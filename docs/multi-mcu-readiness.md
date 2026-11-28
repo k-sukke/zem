@@ -98,7 +98,7 @@ S1・S2 は**新しい MCU を足す前に必ず**済ませる。S3 は 2 ベン
    既知の SoC については型の安全性が残るが、ベンダーを足すたびに型が増え、`Other` の経路も結局必要になるため採らない。
    一方、`Arch` は Zephyr の `arch/` に対応する閉じた小さな集合で、アーキテクチャごとに振る舞いが本当に変わる（ツールチェーンの既定値など）ので、
    enum のまま網羅的な `match` の恩恵を受ける。
-2. `Arch` を Zephyr の `arch/` に合わせて拡張する: `arc`、`arm`、`arm64`、`mips`、`nios2`、`posix`、`riscv`、`rx`、`sparc`、`x86`、`xtensa`。
+2. `Arch` を Zephyr の `arch/` に合わせて拡張する: `arc`、`arm`、`arm64`、`mips`、`posix`、`riscv`、`rx`、`sparc`、`x86`、`xtensa`。
    Zephyr 側の一覧は有限で変化も遅いので enum のままでよい。
 3. `ResolvedTarget` の `&'static str` を `String`（または `Cow<'static, str>`）にし、ツリーから読んだ値を入れられるようにする。
    あわせて `vendor: String` と、どこから得た情報か（`source`）をフィールドごとではなく解決全体で持つ現在の形は維持する。
