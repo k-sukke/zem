@@ -52,6 +52,7 @@ pub fn resolve_static(
             let found = vendor::find_soc(qualifier).ok_or_else(|| BoardError::UnsupportedSoc {
                 board: input.trim().to_string(),
                 soc: qualifier.to_string(),
+                supported: vendor::supported_socs(),
             })?;
             if let Some((_, k)) = known.filter(|(_, k)| k.soc != found.1.name) {
                 return Err(BoardError::SocMismatch {
@@ -73,7 +74,10 @@ pub fn resolve_static(
         } else if let Some(found) = vendor::soc_from_board_prefix(&id.name) {
             (found, ResolutionSource::Heuristic, id.clone())
         } else {
-            return Err(BoardError::Unknown(input.trim().to_string()));
+            return Err(BoardError::Unknown {
+                board: input.trim().to_string(),
+                supported: vendor::supported_socs(),
+            });
         };
 
     if let Some(requested) = arch_override.filter(|a| *a != soc.arch) {
@@ -141,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_esp_board_uses_prefix() {
+    fn unknown_board_uses_soc_prefix() {
         let t = resolve("esp32h2_custom");
         assert_eq!(t.soc.as_str(), "esp32h2");
         assert_eq!(t.source, ResolutionSource::Heuristic);
@@ -154,14 +158,14 @@ mod tests {
     }
 
     #[test]
-    fn non_esp_boards_are_rejected() {
+    fn unsupported_socs_and_unknown_boards_are_rejected() {
         assert!(matches!(
             resolve_static("nrf52840dk/nrf52840", None),
             Err(BoardError::UnsupportedSoc { .. })
         ));
         assert!(matches!(
             resolve_static("nucleo_f401re", None),
-            Err(BoardError::Unknown(_))
+            Err(BoardError::Unknown { .. })
         ));
     }
 

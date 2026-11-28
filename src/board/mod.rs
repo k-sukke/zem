@@ -1,4 +1,6 @@
 pub mod board_yml;
+#[cfg(test)]
+mod fixtures;
 mod qualifier;
 mod resolve;
 mod soc;
@@ -66,24 +68,24 @@ pub enum BoardError {
     )]
     Invalid { board: String, reason: &'static str },
 
-    #[error("board `{board}` targets SoC `{soc}`, which is not an ESP32-series SoC")]
-    #[diagnostic(
-        code(zem::board::unsupported_soc),
-        help(
-            "zem currently supports esp32, esp32s2, esp32s3, esp32c2, esp32c3, esp32c6 and esp32h2"
-        )
-    )]
-    UnsupportedSoc { board: String, soc: String },
+    #[error("board `{board}` targets SoC `{soc}`, which zem does not support yet")]
+    #[diagnostic(code(zem::board::unsupported_soc), help("supported SoCs: {supported}"))]
+    UnsupportedSoc {
+        board: String,
+        soc: String,
+        supported: String,
+    },
 
-    #[error("unknown board `{0}`")]
+    #[error("unknown board `{board}`")]
     #[diagnostic(
         code(zem::board::unknown),
         help(
-            "zem currently supports ESP32-series boards only. If this is an ESP32 board, add the SoC \
-             qualifier explicitly, e.g. `{0}/esp32s3/procpu`; run `zem init` interactively to see known boards"
+            "zem cannot tell which SoC this board uses. If it is one of the supported SoCs \
+             ({supported}), add it as a qualifier, e.g. `{board}/<soc>` or `{board}/<soc>/<cpucluster>`; \
+             run `zem init` interactively to see known boards"
         )
     )]
-    Unknown(String),
+    Unknown { board: String, supported: String },
 
     #[error("board `{board}` uses SoC {expected}, but the qualifier says `{actual}`")]
     #[diagnostic(code(zem::board::soc_mismatch))]
