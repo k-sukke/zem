@@ -10,9 +10,10 @@ use crate::board::Arch;
 
 pub const VENDORS: &[&VendorProfile] = &[&espressif::PROFILE];
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct VendorProfile {
-    /// Matches the `vendor` of a board.yml and the `soc/<vendor>/` directory.
+    /// Identifies the SoC vendor (recorded in state.json). Not a board.yml `vendor`, which
+    /// names the board maker (`seeed` for `xiao_esp32c3`).
     pub id: &'static str,
     pub socs: &'static [SocInfo],
     /// Boards offered by `zem init` and resolvable without a Zephyr tree; not every board.
@@ -30,6 +31,13 @@ pub struct VendorProfile {
     pub path_markers: &'static [PathMarker],
     /// USB devices shown with a friendly name by `zem doctor`.
     pub usb_ids: &'static [UsbId],
+}
+
+/// Only the id: the tables would bury every `ResolvedTarget` printed with `{:?}`.
+impl std::fmt::Debug for VendorProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VendorProfile({})", self.id)
+    }
 }
 
 impl VendorProfile {
