@@ -312,9 +312,17 @@ cargo test                          # unit and CLI tests (no network needed)
 cargo test --test e2e -- --ignored  # E2E that actually fetches and builds Zephyr (several GB, several minutes)
 ```
 
-To release, bump `version` in `Cargo.toml`, commit, then push a matching tag (`git tag v0.1.0 && git push origin v0.1.0`).
-[cargo-dist](https://axodotdev.github.io/cargo-dist/) builds the binaries, creates the GitHub Release, and publishes the
-Homebrew formula to [`k-sukke/homebrew-tap`](https://github.com/k-sukke/homebrew-tap).
+To release, use [cargo-release](https://github.com/crate-ci/cargo-release) (`cargo install cargo-release`) on an
+up-to-date `main`:
+
+```sh
+cargo release minor             # dry run: shows the version bump, commit and tag (patch / minor / major)
+cargo release minor --execute   # bumps Cargo.toml and Cargo.lock, commits "Release vX.Y.Z", tags vX.Y.Z and pushes
+```
+
+The settings are in [`release.toml`](release.toml); nothing is published to crates.io. The pushed tag starts
+[cargo-dist](https://axodotdev.github.io/cargo-dist/), which builds the binaries, creates the GitHub Release, and
+publishes the Homebrew formula to [`k-sukke/homebrew-tap`](https://github.com/k-sukke/homebrew-tap).
 
 The design and per-phase notes are in [PLAN.md](PLAN.md) (Japanese).
 
