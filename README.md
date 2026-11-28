@@ -14,14 +14,18 @@ zem west espressif monitor
 > [!WARNING]
 > **This project is experimental.**
 > - Commands, the `zem.toml` / `zem.lock` formats and the `~/.zem` layout may change without notice.
-> - It has been tested on real hardware **only with an ESP32 (ESP32-D0WD-V3 / `esp32_devkitc`)**, on:
->   - macOS (Apple Silicon)
->   - Windows 11 on ARM (in a [UTM](https://mac.getutm.app/) virtual machine on macOS, running the x86_64 binary under
->     emulation)
->   - Ubuntu 24.04 LTS (aarch64, in a QEMU virtual machine on macOS with USB passthrough)
+> - It has been tested on real hardware only with:
+>   - an ESP32 (ESP32-D0WD-V3 / `esp32_devkitc`) on
+>     - macOS (Apple Silicon)
+>     - Windows 11 on ARM (in a [UTM](https://mac.getutm.app/) virtual machine on macOS, running the x86_64 binary
+>       under emulation)
+>     - Ubuntu 24.04 LTS (aarch64, in a QEMU virtual machine on macOS with USB passthrough)
+>   - a Seeed XIAO ESP32C3 (`xiao_esp32c3`) on macOS (Apple Silicon)
 >
 >   Native x86_64 Windows and x86_64 Linux have not been tested on real hardware.
->   ESP32-S3 / C3 / C6 have only been verified to build. Other SoCs and boards are untested.
+>   ESP32-S3 / C6 have only been verified to build. Other SoCs and boards are untested.
+> - Only Espressif ESP32-series SoCs are supported, and only boards that are part of Zephyr: see
+>   [Known limitations](#known-limitations).
 > - The only Zephyr version tested is v4.2.0.
 >
 > Please report problems via Issues.
@@ -302,11 +306,35 @@ set = { FOO = "bar" }      # extra variables to set
 
 ## Supported boards
 
-Official Zephyr boards for ESP32 / ESP32-S2 / ESP32-S3 / ESP32-C2 / ESP32-C3 / ESP32-C6 (`esp32_devkitc`,
-`esp32s3_devkitc`, `esp32c3_devkitm`, ...) are targeted. ESP32-H2 requires a Zephyr newer than 4.2.
-The final decision on a board follows the fetched Zephyr's `board.yml`.
+Any board in Zephyr's `boards/` whose SoC is an Espressif ESP32-series SoC (ESP32, ESP32-S2, ESP32-S3, ESP32-C2,
+ESP32-C3, ESP32-C6, ESP32-H2) can be used, including boards zem has no entry for (`ttgo_t8c3`, `m5stack_atoms3`,
+`tdongle_s3`, ...). `zem sync` looks the board up in the fetched Zephyr tree (`board.yml`, `soc.yml` and the board's
+twister metadata) and takes the SoC, CPU architecture, toolchain and HAL module from there.
 
-As noted above, only the ESP32 (`esp32_devkitc`) has been tested on real hardware.
+- A board name without a CPU cluster gets the SoC's main core: `esp32s3_devkitc` becomes
+  `esp32s3_devkitc/esp32s3/procpu`. Boards with several SoCs need the SoC in the name (`board/soc`).
+- ESP32-H2 requires a Zephyr newer than 4.2.
+- `zem init` offers a short list of common boards; any other board name can be typed in.
+
+As noted above, only `esp32_devkitc` and `xiao_esp32c3` have been tested on real hardware.
+
+## Known limitations
+
+These are the two main gaps, in the order they are planned to be addressed. Details and the plan are in
+[`docs/multi-mcu-progress.md`](docs/multi-mcu-progress.md) (Japanese).
+
+1. **Custom boards are not supported yet.** Zephyr lets an application define its own board (for example a
+   product PCB built around an ESP32-S3 module) in `boards/<vendor>/<board>/` next to the application, or in a
+   module's `board_root`, and `west build` finds it there. `zem sync` only looks in the Zephyr tree, so it stops
+   with "board ... does not exist in Zephyr" for such boards. Until this is fixed, a product has to be built as an
+   existing Zephyr board adjusted with devicetree overlays and Kconfig (which `zem west build` passes to Zephyr
+   unchanged), rather than with a board definition of its own.
+2. **Only Espressif SoCs.** The structure for other vendors is in place (each vendor is one profile in
+   [`src/vendor/`](src/vendor/), and SoCs, architecture and toolchain are read from the Zephyr tree), but no other
+   vendor has a profile yet. Boards of other vendors stop `zem sync` at the Board step. Supporting them also needs the
+   host tools that flashing and monitoring use (J-Link, OpenOCD, pyOCD, picotool, nrfutil, ...): zem does not set
+   them up or check them yet. ESP32 boards are not affected, as their flasher and monitor come with
+   `hal_espressif`.
 
 ## Development
 
@@ -327,7 +355,7 @@ The settings are in [`release.toml`](release.toml); nothing is published to crat
 [cargo-dist](https://axodotdev.github.io/cargo-dist/), which builds the binaries, creates the GitHub Release, and
 publishes the Homebrew formula to [`k-sukke/homebrew-tap`](https://github.com/k-sukke/homebrew-tap).
 
-Design notes are in [`docs/`](docs/) (Japanese): the MVP design and per-phase notes in [`docs/mvp-plan.md`](docs/mvp-plan.md), and the plan for supporting more MCUs in [`docs/multi-mcu-readiness.md`](docs/multi-mcu-readiness.md).
+Design notes are in [`docs/`](docs/) (Japanese): the MVP design and per-phase notes in [`docs/mvp-plan.md`](docs/mvp-plan.md), the plan for supporting more MCUs in [`docs/multi-mcu-readiness.md`](docs/multi-mcu-readiness.md), and its progress and remaining issues in [`docs/multi-mcu-progress.md`](docs/multi-mcu-progress.md). Changes per release are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
