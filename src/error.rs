@@ -29,9 +29,7 @@ pub enum ZemError {
     #[error("{feature} is not supported on {os} yet")]
     #[diagnostic(
         code(zem::unsupported_platform),
-        help(
-            "this version of zem runs environments on macOS and Linux only; Windows support is planned"
-        )
+        help("zem runs environments on macOS, Linux and Windows")
     )]
     Unsupported {
         feature: &'static str,

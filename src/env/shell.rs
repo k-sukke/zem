@@ -3,19 +3,31 @@ use std::ffi::OsStr;
 use std::str::FromStr;
 
 use super::EnvBuilder;
+use crate::platform::Os;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellKind {
     Posix,
     Fish,
+    PowerShell,
+    Cmd,
     Json,
 }
 
 impl ShellKind {
-    /// From `$SHELL`; anything that is not fish gets POSIX syntax.
-    pub fn detect(shell_var: Option<&OsStr>) -> Self {
-        let is_fish = shell_var
-            .and_then(|s| std::path::Path::new(s).file_name())
+    /// From the user's shell (`$SHELL` on Unix); anything that is not fish gets POSIX syntax.
+    /// Without one, POSIX on Unix (matching `zem shell`'s `/bin/sh`) and PowerShell, the
+    /// default shell of Windows Terminal, on Windows.
+    pub fn detect(user_shell: Option<&OsStr>, os: Os) -> Self {
+        let Some(shell) = user_shell.filter(|s| !s.is_empty()) else {
+            return if os == Os::Windows {
+                ShellKind::PowerShell
+            } else {
+                ShellKind::Posix
+            };
+        };
+        let is_fish = std::path::Path::new(shell)
+            .file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with("fish"));
         if is_fish {
             ShellKind::Fish
@@ -32,9 +44,11 @@ impl FromStr for ShellKind {
         match s {
             "posix" | "sh" | "bash" | "zsh" => Ok(ShellKind::Posix),
             "fish" => Ok(ShellKind::Fish),
+            "powershell" | "pwsh" => Ok(ShellKind::PowerShell),
+            "cmd" => Ok(ShellKind::Cmd),
             "json" => Ok(ShellKind::Json),
             other => Err(format!(
-                "unsupported shell `{other}` (expected bash, zsh, sh, fish or json)"
+                "unsupported shell `{other}` (expected bash, zsh, sh, fish, powershell, cmd or json)"
             )),
         }
     }
@@ -74,8 +88,106 @@ fn fish_quote(value: &str) -> String {
     format!("'{}'", value.replace('\\', r"\\").replace('\'', r"\'"))
 }
 
+/// Characters PowerShell accepts as single quotes: `'` and the typographic `‘ ’ ‚ ‛`.
+const POWERSHELL_SINGLE_QUOTES: &[char] = &['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'];
+
+/// A PowerShell single-quoted string. Every single-quote character ends the string unless it
+/// is doubled, so each one is doubled.
+pub fn powershell_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        if POWERSHELL_SINGLE_QUOTES.contains(&c) {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+
+/// For text inside `"..."` in a batch file (`.zem\activate.bat`), where only `%` needs
+/// doubling. Windows paths cannot contain `"`.
+pub fn batch_escape(value: &str) -> String {
+    value.replace('%', "%%")
+}
+
+/// For unquoted text in a batch file: `%` is doubled and cmd's metacharacters, `"` included,
+/// get a caret. Unlike `set "K=V"`, a `"` in the value cannot end the quoting and expose
+/// `&` or `|` to the parser.
+fn batch_caret_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '%' => out.push_str("%%"),
+            '^' | '&' | '|' | '<' | '>' | '"' | '(' | ')' => {
+                out.push('^');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// A name every shell can set: `[A-Za-z_][A-Za-z0-9_]*`. `[env]` names must look like this,
+/// since one `zem.toml` is shared between POSIX shells, fish, PowerShell and cmd.
+pub fn is_portable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Whether `shell` can take `name` as written into its syntax. Names are not quoted in POSIX
+/// and fish output, so anything else could run as a command. PowerShell and cmd also accept
+/// Windows names such as `PROGRAMFILES(X86)`; their output quotes or escapes the name, and only
+/// control characters (a line break would start another command) are refused. Names come from
+/// the process environment too, so this is checked here and not only in config validation.
+fn name_allowed(name: &str, shell: ShellKind) -> bool {
+    match shell {
+        ShellKind::Posix | ShellKind::Fish => is_portable_name(name),
+        ShellKind::PowerShell => windows_name(name),
+        // `set /P` and `set /A` are switches (`set /P X=` waits for input), and `set` drops
+        // leading blanks, so the name must not start with either.
+        ShellKind::Cmd => windows_name(name) && !name.starts_with(['/', ' ', '\t']),
+        ShellKind::Json => true,
+    }
+}
+
+fn windows_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('=') && !name.contains(char::is_control)
+}
+
 pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
+    let skipped = diff
+        .unset
+        .iter()
+        .chain(diff.set.keys())
+        .filter(|k| !name_allowed(k, shell))
+        .count();
+    let diff = &EnvDiff {
+        set: diff
+            .set
+            .iter()
+            .filter(|(k, _)| name_allowed(k, shell))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        unset: diff
+            .unset
+            .iter()
+            .filter(|k| name_allowed(k, shell))
+            .cloned()
+            .collect(),
+    };
     let mut out = String::new();
+    if skipped > 0 {
+        let comment = if shell == ShellKind::Cmd { "@rem" } else { "#" };
+        out.push_str(&format!(
+            "{comment} zem: skipped {skipped} variable(s) whose names this shell cannot use\n"
+        ));
+    }
     match shell {
         ShellKind::Posix => {
             for key in &diff.unset {
@@ -98,6 +210,42 @@ pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
                 } else {
                     out.push_str(&format!("set -gx {key} {}\n", fish_quote(value)));
                 }
+            }
+        }
+        ShellKind::PowerShell => {
+            for key in &diff.unset {
+                out.push_str(&format!(
+                    "Remove-Item -LiteralPath {} -ErrorAction SilentlyContinue\n",
+                    powershell_quote(&format!("Env:{key}"))
+                ));
+            }
+            for (key, value) in &diff.set {
+                out.push_str(&format!(
+                    "Set-Item -LiteralPath {} -Value {}\n",
+                    powershell_quote(&format!("Env:{key}")),
+                    powershell_quote(value)
+                ));
+            }
+        }
+        // cmd output is a batch file that `.zem\activate.bat` `call`s.
+        ShellKind::Cmd => {
+            for key in &diff.unset {
+                out.push_str(&format!("@set {}=\n", batch_caret_escape(key)));
+            }
+            for (key, value) in &diff.set {
+                if value.contains(['\r', '\n']) {
+                    // A line break would end the command and run the rest as another one.
+                    out.push_str(&format!(
+                        "@echo zem: {} is not set: cmd cannot hold a line break in a variable 1>&2\n",
+                        batch_caret_escape(key)
+                    ));
+                    continue;
+                }
+                out.push_str(&format!(
+                    "@set {}={}\n",
+                    batch_caret_escape(key),
+                    batch_caret_escape(value)
+                ));
             }
         }
         ShellKind::Json => {
@@ -160,15 +308,133 @@ mod tests {
     #[test]
     fn detects_shell() {
         assert_eq!(
-            ShellKind::detect(Some(OsStr::new("/opt/homebrew/bin/fish"))),
+            ShellKind::detect(Some(OsStr::new("/opt/homebrew/bin/fish")), Os::MacOs),
             ShellKind::Fish
         );
         assert_eq!(
-            ShellKind::detect(Some(OsStr::new("/bin/zsh"))),
+            ShellKind::detect(Some(OsStr::new("/bin/zsh")), Os::Linux),
             ShellKind::Posix
         );
-        assert_eq!(ShellKind::detect(None), ShellKind::Posix);
+        assert_eq!(ShellKind::detect(None, Os::Linux), ShellKind::Posix);
+        assert_eq!(
+            ShellKind::detect(Some(OsStr::new("")), Os::MacOs),
+            ShellKind::Posix
+        );
+        assert_eq!(ShellKind::detect(None, Os::Windows), ShellKind::PowerShell);
         assert_eq!("bash".parse::<ShellKind>(), Ok(ShellKind::Posix));
-        assert!("powershell".parse::<ShellKind>().is_err());
+        assert_eq!("pwsh".parse::<ShellKind>(), Ok(ShellKind::PowerShell));
+        assert_eq!("cmd".parse::<ShellKind>(), Ok(ShellKind::Cmd));
+        assert!("tcsh".parse::<ShellKind>().is_err());
+    }
+
+    fn windows_sample() -> EnvDiff {
+        let current = EnvBuilder::from_vars([("IDF_PATH", r"C:\esp")]);
+        let target = EnvBuilder::from_vars([
+            ("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+            ("ZEPHYR_BASE", r"C:\Users\it's me\100%\zephyr"),
+        ]);
+        diff(&current, &target)
+    }
+
+    #[test]
+    fn renders_powershell() {
+        insta::assert_snapshot!(render(&windows_sample(), ShellKind::PowerShell), @r"
+        Remove-Item -LiteralPath 'Env:IDF_PATH' -ErrorAction SilentlyContinue
+        Set-Item -LiteralPath 'Env:PROGRAMFILES(X86)' -Value 'C:\Program Files (x86)'
+        Set-Item -LiteralPath 'Env:ZEPHYR_BASE' -Value 'C:\Users\it''s me\100%\zephyr'
+        ");
+    }
+
+    #[test]
+    fn powershell_quote_doubles_typographic_quotes() {
+        assert_eq!(powershell_quote("it's"), "'it''s'");
+        assert_eq!(
+            powershell_quote("C:\\work\\O\u{2019}Brien \u{2018}x\u{201A}\u{201B}"),
+            "'C:\\work\\O\u{2019}\u{2019}Brien \u{2018}\u{2018}x\u{201A}\u{201A}\u{201B}\u{201B}'"
+        );
+    }
+
+    #[test]
+    fn renders_cmd_batch() {
+        insta::assert_snapshot!(render(&windows_sample(), ShellKind::Cmd), @r#"
+        @set IDF_PATH=
+        @set PROGRAMFILES^(X86^)=C:\Program Files ^(x86^)
+        @set ZEPHYR_BASE=C:\Users\it's me\100%%\zephyr
+        "#);
+    }
+
+    #[test]
+    fn names_that_would_run_as_commands_are_skipped() {
+        let current = EnvBuilder::from_vars([("OLD\nrm -rf ~", "x")]);
+        let target = EnvBuilder::from_vars([
+            ("GOOD", "1"),
+            ("A;touch x", "1"),
+            ("X\necho INJECTED\nREM", "1"),
+            ("PROGRAMFILES(X86)", "C:\\pf"),
+        ]);
+        let d = diff(&current, &target);
+        for shell in [ShellKind::Posix, ShellKind::Fish] {
+            let out = render(&d, shell);
+            assert!(out.starts_with("# zem: skipped 4 variable(s)"), "{out}");
+            assert!(out.contains("GOOD"), "{out}");
+            assert!(!out.contains("touch") && !out.contains("INJECTED"), "{out}");
+            assert!(!out.contains("rm -rf") && !out.contains("X86"), "{out}");
+        }
+        for shell in [ShellKind::PowerShell, ShellKind::Cmd] {
+            let out = render(&d, shell);
+            assert!(out.contains("skipped 2 variable(s)"), "{out}");
+            assert!(
+                !out.contains("INJECTED") && !out.contains("rm -rf"),
+                "{out}"
+            );
+            assert!(out.contains("PROGRAMFILES"), "{out}");
+        }
+        assert!(render(&d, ShellKind::Json).contains("INJECTED"));
+    }
+
+    #[test]
+    fn cmd_skips_names_set_reads_as_switches() {
+        let current = EnvBuilder::from_vars([("/P OLD", "x")]);
+        let target = EnvBuilder::from_vars([("/P ZEM_TEST", "1"), ("/A X", "1"), (" LEAD", "1")]);
+        let out = render(&diff(&current, &target), ShellKind::Cmd);
+        assert_eq!(
+            out, "@rem zem: skipped 4 variable(s) whose names this shell cannot use\n",
+            "{out}"
+        );
+        assert!(render(&diff(&current, &target), ShellKind::PowerShell).contains("/P ZEM_TEST"));
+    }
+
+    #[test]
+    fn portable_names() {
+        assert!(is_portable_name("ESPTOOL_PORT") && is_portable_name("_x1"));
+        for bad in [
+            "",
+            "1A",
+            "A-B",
+            "A B",
+            "A;B",
+            "A\nB",
+            "PROGRAMFILES(X86)",
+            "É",
+        ] {
+            assert!(!is_portable_name(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn cmd_values_with_quotes_keep_metacharacters_escaped() {
+        let current = EnvBuilder::from_vars([("A", "1")]);
+        let target = EnvBuilder::from_vars([
+            ("A", "1"),
+            ("CFLAGS", r#"-DNAME="a&b" ^x|y<z>"#),
+            ("BAD", "one\r\nexit"),
+        ]);
+        let out = render(&diff(&current, &target), ShellKind::Cmd);
+        assert!(
+            out.contains(r#"@set CFLAGS=-DNAME=^"a^&b^" ^^x^|y^<z^>"#),
+            "{out}"
+        );
+        assert!(!out.contains("exit"), "{out}");
+        assert!(out.contains("@echo zem: BAD is not set"), "{out}");
     }
 }

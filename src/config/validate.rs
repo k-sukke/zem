@@ -117,8 +117,10 @@ pub fn validate(cfg: &ZemConfig) -> Result<Validated> {
     }
 
     for key in cfg.env.passthrough.iter().chain(cfg.env.set.keys()) {
-        if key.is_empty() || key.contains('=') || key.contains('\0') {
-            problems.push(format!("[env] variable name `{key}` is invalid"));
+        if !crate::env::shell::is_portable_name(key) {
+            problems.push(format!(
+                "[env] variable name {key:?} is invalid (use letters, digits and `_`, not starting with a digit)"
+            ));
         }
     }
 
@@ -219,6 +221,21 @@ mod tests {
         assert_eq!(classify_revision(&"a".repeat(40)), RevisionKind::Commit);
         assert_eq!(classify_revision("main"), RevisionKind::Branch);
         assert_eq!(classify_revision("v4-branch"), RevisionKind::Branch);
+    }
+
+    #[test]
+    fn rejects_env_names_shells_cannot_set() {
+        let mut cfg = config("esp32c3_devkitm", "v4.2.0");
+        cfg.env.set.insert("X\necho INJECTED".into(), "1".into());
+        cfg.env.passthrough.push("A;B".into());
+        cfg.env.passthrough.push("MY_TOKEN".into());
+        match validate(&cfg) {
+            Err(ZemError::ConfigInvalid { problems }) => {
+                assert_eq!(problems.len(), 2, "{problems:?}");
+                assert!(problems[0].contains(r#""A;B""#), "{problems:?}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 
     #[test]

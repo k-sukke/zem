@@ -56,7 +56,7 @@ fn host_checks() -> Vec<Check> {
             Status::Warn,
             "OS",
             format!(
-                "{} ({}): sync/build/flash are not supported yet",
+                "{} ({}): sync/build/flash are not supported",
                 os.name(),
                 platform::arch_name()
             ),
@@ -82,7 +82,55 @@ fn host_checks() -> Vec<Check> {
         }
         Err(err) => Check::new(Status::Fail, "ZEM_HOME", err.to_string()),
     });
+    checks.extend(long_path_checks(os));
     checks
+}
+
+const ENABLE_LONG_PATHS: &str = "New-ItemProperty -Path HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force";
+const GIT_LONG_PATHS: &str = "git config --global core.longpaths true";
+
+/// Zephyr modules and build trees nest deeply under ZEM_HOME; on Windows both the OS and git
+/// stop at 260 characters unless told otherwise.
+fn long_path_checks(os: Os) -> Vec<Check> {
+    if os != Os::Windows {
+        return Vec::new();
+    }
+    let mut checks = Vec::new();
+    match platform::long_paths_enabled() {
+        Some(true) => checks.push(Check::new(Status::Ok, "long paths", "enabled")),
+        Some(false) => checks.push(
+            Check::new(
+                Status::Warn,
+                "long paths",
+                "disabled; builds can fail on paths over 260 characters",
+            )
+            .hint(Some(format!(
+                "in an administrator PowerShell: {ENABLE_LONG_PATHS}"
+            ))),
+        ),
+        None => {}
+    }
+    if tools::probe(&tools::GIT).is_some() {
+        checks.push(if git_long_paths() {
+            Check::new(Status::Ok, "git long paths", "core.longpaths = true")
+        } else {
+            Check::new(
+                Status::Warn,
+                "git long paths",
+                "core.longpaths is not set; deep Zephyr modules can fail to check out",
+            )
+            .hint(Some(GIT_LONG_PATHS))
+            .fix(GIT_LONG_PATHS)
+        });
+    }
+    checks
+}
+
+fn git_long_paths() -> bool {
+    std::process::Command::new("git")
+        .args(["config", "--get", "--type=bool", "core.longpaths"])
+        .output()
+        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "true")
 }
 
 fn describe(probe: &Probe) -> String {

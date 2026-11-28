@@ -52,7 +52,7 @@ impl Os {
 
     /// Whether zem can create and run environments (not just parse config) on this OS.
     pub fn runs_environments(self) -> bool {
-        matches!(self, Os::MacOs | Os::Linux)
+        matches!(self, Os::MacOs | Os::Linux | Os::Windows)
     }
 }
 
@@ -92,19 +92,38 @@ pub fn venv_bin_dir(venv: &Path) -> PathBuf {
     venv.join(imp::VENV_BIN_DIR)
 }
 
+/// Extensions zem adds to `PATHEXT` in its environments. Zephyr's west runners check scripts
+/// such as `esptool.py` with `shutil.which`, which on Windows only accepts files whose
+/// extension is in `PATHEXT`, so `west flash` failed with "esptool.py not found".
+pub fn script_pathext() -> &'static [&'static str] {
+    imp::SCRIPT_PATHEXT
+}
+
+/// Windows' own `PATHEXT`, used when the variable is unset.
+pub fn default_pathext() -> &'static str {
+    imp::DEFAULT_PATHEXT
+}
+
 pub fn venv_python(venv: &Path) -> PathBuf {
     venv_bin_dir(venv).join(exe_name("python"))
 }
 
-/// Target triple of the uv release asset for this host (`uv-<target>.tar.gz`), or `None`.
+/// Target triple of the uv release asset for this host (`uv-<target><uv_archive_ext>`), or `None`.
 pub fn uv_target() -> Option<&'static str> {
     match (Os::current(), arch_name()) {
         (Os::MacOs, "aarch64") => Some("aarch64-apple-darwin"),
         (Os::MacOs, "x86_64") => Some("x86_64-apple-darwin"),
         (Os::Linux, "x86_64") => Some("x86_64-unknown-linux-musl"),
         (Os::Linux, "aarch64") => Some("aarch64-unknown-linux-musl"),
+        (Os::Windows, "x86_64") => Some("x86_64-pc-windows-msvc"),
+        (Os::Windows, "aarch64") => Some("aarch64-pc-windows-msvc"),
         _ => None,
     }
+}
+
+/// Archive format of uv release assets: `.tar.gz` on Unix, `.zip` on Windows.
+pub fn uv_archive_ext() -> &'static str {
+    imp::UV_ARCHIVE_EXT
 }
 
 /// Environment variable names are case-insensitive on Windows (`Path` == `PATH`).
@@ -184,6 +203,24 @@ pub fn run_replacing(cmd: Command) -> ZemError {
         command,
         source: imp::run_replacing(cmd),
     }
+}
+
+/// The user's login shell: `$SHELL` on Unix. `None` on Windows, where `$SHELL` is only set
+/// inside MSYS/Git Bash and holds a path that native programs cannot start.
+pub fn user_shell() -> Option<PathBuf> {
+    imp::user_shell()
+}
+
+/// Shell for `zem shell` when the user has none: `/bin/sh` on Unix, PowerShell on Windows
+/// (PowerShell 7 `pwsh` if installed, else the built-in Windows PowerShell).
+pub fn fallback_shell() -> PathBuf {
+    imp::fallback_shell()
+}
+
+/// Whether Win32 paths longer than 260 characters are enabled (the `LongPathsEnabled`
+/// registry value). `None` where the limit does not exist or could not be read.
+pub fn long_paths_enabled() -> Option<bool> {
+    imp::long_paths_enabled()
 }
 
 pub fn serial_port_hint() -> &'static str {

@@ -15,6 +15,7 @@ use crate::home::ZemHome;
 use crate::platform;
 
 const PATH: &str = "PATH";
+const PATHEXT: &str = "PATHEXT";
 
 /// The complete environment handed to child processes. Children never inherit zem's own
 /// environment directly; [`EnvBuilder::apply`] clears it first.
@@ -118,6 +119,28 @@ impl EnvBuilder {
         self.set_path_entries(entries);
     }
 
+    /// Append `exts` to the `;`-separated `PATHEXT` (starting from `default` when it is unset),
+    /// skipping extensions it already lists, compared case-insensitively as Windows does.
+    pub fn append_pathext(&mut self, exts: &[&str], default: &str) {
+        if exts.is_empty() {
+            return;
+        }
+        let mut value = self
+            .get(PATHEXT)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string_lossy().into_owned())
+            .unwrap_or_else(|| default.to_string());
+        for ext in exts {
+            if !value.split(';').any(|e| e.eq_ignore_ascii_case(ext)) {
+                if !value.is_empty() && !value.ends_with(';') {
+                    value.push(';');
+                }
+                value.push_str(ext);
+            }
+        }
+        self.set(PATHEXT, value);
+    }
+
     pub fn apply(&self, cmd: &mut Command) {
         cmd.env_clear();
         cmd.envs(self.vars.iter().map(|(k, v)| (k, v)));
@@ -149,6 +172,7 @@ pub fn zem_env_from(mut env: EnvBuilder, loc: &EnvLocations<'_>, config: &EnvCon
     let home = loc.home;
     env.sanitize(&config.passthrough, config.isolation);
     env.prepend_path(&platform::venv_bin_dir(loc.venv_dir));
+    env.append_pathext(platform::script_pathext(), platform::default_pathext());
 
     env.set("ZEM_ACTIVE", "1");
     env.set("ZEM_HOME", home.root());
@@ -212,6 +236,23 @@ mod tests {
     }
 
     #[test]
+    fn pathext_gets_missing_extensions_once() {
+        let mut env = EnvBuilder::from_vars([("PATHEXT", ".COM;.EXE;.BAT")]);
+        env.append_pathext(&[".PY"], ".COM;.EXE");
+        assert_eq!(env.get("PATHEXT"), Some(OsStr::new(".COM;.EXE;.BAT;.PY")));
+        env.append_pathext(&[".py"], ".COM;.EXE");
+        assert_eq!(env.get("PATHEXT"), Some(OsStr::new(".COM;.EXE;.BAT;.PY")));
+
+        let mut unset = EnvBuilder::default();
+        unset.append_pathext(&[".PY"], ".COM;.EXE");
+        assert_eq!(unset.get("PATHEXT"), Some(OsStr::new(".COM;.EXE;.PY")));
+
+        let mut untouched = EnvBuilder::default();
+        untouched.append_pathext(&[], ".COM;.EXE");
+        assert!(untouched.get("PATHEXT").is_none());
+    }
+
+    #[test]
     fn passthrough_keeps_variables() {
         let mut env = polluted();
         env.sanitize(&["PIP_INDEX_URL".to_string()], Isolation::Denylist);
@@ -260,6 +301,14 @@ mod tests {
         assert_eq!(env.get("FOO"), Some(OsStr::new("bar")));
         assert!(env.get("ZEPHYR_SDK_INSTALL_DIR").is_none());
         assert!(env.get("IDF_PATH").is_none());
+        // Only Windows adds extensions (`.PY`), so west runners find `esptool.py`.
+        let pathext = env
+            .get("PATHEXT")
+            .map(|v| v.to_string_lossy().to_uppercase());
+        for ext in platform::script_pathext() {
+            let pathext = pathext.as_deref().unwrap_or_default();
+            assert!(pathext.split(';').any(|e| e == *ext), "{pathext}");
+        }
     }
 
     #[test]

@@ -1,13 +1,16 @@
 use std::ffi::OsStr;
 use std::io;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::{InstallHint, Os, SerialAccess};
 
 pub const EXE_SUFFIX: &str = "";
 pub const SDK_ARCHIVE_EXT: &str = ".tar.xz";
+pub const UV_ARCHIVE_EXT: &str = ".tar.gz";
+pub const SCRIPT_PATHEXT: &[&str] = &[];
+pub const DEFAULT_PATHEXT: &str = "";
 pub const VENV_BIN_DIR: &str = "bin";
 
 pub const STRICT_ENV_ALLOWLIST: &[&str] = &[
@@ -57,6 +60,20 @@ pub fn tls_config() -> ureq::tls::TlsConfig {
 
 pub fn to_cmake_path(p: &Path) -> String {
     p.to_string_lossy().into_owned()
+}
+
+pub fn user_shell() -> Option<PathBuf> {
+    std::env::var_os("SHELL")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
+pub fn fallback_shell() -> PathBuf {
+    PathBuf::from("/bin/sh")
+}
+
+pub fn long_paths_enabled() -> Option<bool> {
+    None
 }
 
 pub fn serial_port_hint() -> &'static str {

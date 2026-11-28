@@ -713,6 +713,11 @@ manifest:
 4. doctor の Windows 向けチェック: `LongPathsEnabled`、`git config core.longpaths`、`core.autocrlf`、USB シリアルドライバ（CP210x / CH34x）
 5. CI の E2E に `windows-latest` を追加。配布物に Windows 向け zip / winget / scoop を追加
 
+**進捗**
+- 済: uv の取得（Windows は `uv-<target>.zip`、`uv.exe` がトップレベル）、SDK の `.7z` 展開（`sevenz-rust2`。v0.17.4 の minimal と nios2 ツールチェーンの実物で確認）、`run_replacing` 中の Ctrl-C を子に任せる（`ctrlc`）、`zem env --shell powershell|cmd`、`.zem/activate.ps1` / `.zem/activate.bat`、`zem shell` の PowerShell（`-EncodedCommand`）/ cmd 対応、`ensure_supported` の解禁、doctor の `LongPathsEnabled` と `core.longpaths` チェック、配布物に `x86_64-pc-windows-msvc` の zip と PowerShell インストーラを追加
+- Windows では `$SHELL` を無視し、既定のシェルは PowerShell とする（MSYS / Git Bash の `$SHELL` はネイティブのプログラムから起動できないため）
+- 未: 実機での `init → sync → build → flash` の確認、Windows 向けの CLI 統合テスト（偽の west / uv を `.cmd` で用意する必要がある）、E2E の `windows-latest`、dtc の入手経路、`core.autocrlf` と USB シリアルドライバのチェック、winget / scoop
+
 ---
 
 ## 6. 技術的リスクと割り切りポイント

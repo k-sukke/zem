@@ -635,7 +635,6 @@ mod synced {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn west_without_sync_points_to_sync() {
     let sb = Sandbox::new();
@@ -645,20 +644,6 @@ fn west_without_sync_points_to_sync() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not been synced"));
-}
-
-#[cfg(windows)]
-#[test]
-fn environment_commands_are_rejected_on_windows() {
-    let sb = Sandbox::new();
-    sb.init("esp32c3_devkitm");
-    for cmd in [&["sync"][..], &["west", "build"]] {
-        sb.zem()
-            .args(cmd)
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("not supported on Windows yet"));
-    }
 }
 
 #[test]

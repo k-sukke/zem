@@ -32,15 +32,19 @@ tar = { version = "0.4.46", default-features = false }
 thiserror = "2.0.21"
 toml = "1.2.3"
 which = "8.0.6"
+zip = { version = "9.8.2", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(unix)'.dependencies]
 liblzma = { version = "0.4.9", default-features = false, features = ["static"] }
 ureq = "3.5.2"
 
 [target.'cfg(windows)'.dependencies]
+ctrlc = "3.5.3"
+sevenz-rust2 = { version = "0.27.0", default-features = false, features = ["util"] }
 ureq = { version = "3.5.2", default-features = false, features = ["gzip", "native-tls-no-default"] }
 
 [dev-dependencies]
+sevenz-rust2 = { version = "0.27.0", default-features = false, features = ["compress", "util"] }
 assert_cmd = "2.2.2"
 insta = "1.49.0"
 predicates = "3.1.4"

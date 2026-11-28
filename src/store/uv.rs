@@ -46,7 +46,7 @@ pub fn ensure(home: &ZemHome) -> Result<Uv> {
             fetched: false,
         });
     }
-    let asset = format!("uv-{target}.tar.gz");
+    let asset = format!("uv-{target}{}", platform::uv_archive_ext());
     let url = format!("{RELEASE_BASE}/{UV_VERSION}/{asset}");
     let checksum = download::get_text(&format!("{url}.sha256"))?;
     let expected = download::sha256_of_line(&checksum).ok_or_else(|| unsupported(&asset))?;
@@ -63,26 +63,40 @@ pub fn ensure(home: &ZemHome) -> Result<Uv> {
     })
 }
 
-/// Unpack a uv release archive (`uv-<target>/uv`, `uv-<target>/uvx`) into the version directory.
+/// Unpack a uv release archive into the version directory. Unix releases are tar.gz files
+/// with `uv-<target>/uv`; Windows releases are zip files with `uv.exe` at the top level.
 /// The unpacked directory is renamed into place, so a half-extracted uv is never visible.
 fn install_archive(home: &ZemHome, archive: &Path, target: &str) -> Result<()> {
     let root = home.tools_dir().join("uv");
     let staged = StagedDir::new_in(&root)?;
-    let file = File::open(archive).map_err(ZemError::io(archive))?;
-    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(BufReader::new(file)));
-    tar.set_preserve_permissions(true);
-    tar.unpack(staged.path()).map_err(ZemError::io(archive))?;
+    let unpacked = staged.path().join("unpacked");
+    unpack(archive, &unpacked).map_err(ZemError::io(archive))?;
 
-    let top = staged.path().join(format!("uv-{target}"));
-    if !top.join(platform::exe_name("uv")).is_file() {
-        return Err(ZemError::CorruptState {
+    let uv = platform::exe_name("uv");
+    let top = [unpacked.join(format!("uv-{target}")), unpacked]
+        .into_iter()
+        .find(|dir| dir.join(&uv).is_file())
+        .ok_or_else(|| ZemError::CorruptState {
             path: archive.to_path_buf(),
-            message: format!("archive does not contain `uv-{target}/uv`"),
-        });
-    }
+            message: format!("archive does not contain `{}`", uv.to_string_lossy()),
+        })?;
     let dest = home.uv_dir(UV_VERSION);
     fsutil::remove_dir_all_if_exists(&dest)?;
     fs::rename(&top, &dest).map_err(ZemError::io(&dest))
+}
+
+/// Extract a `.tar.gz` or `.zip` archive, chosen by file name.
+fn unpack(archive: &Path, dest: &Path) -> std::io::Result<()> {
+    let file = BufReader::new(File::open(archive)?);
+    if archive.extension().is_some_and(|e| e == "zip") {
+        zip::ZipArchive::new(file)?
+            .extract(dest)
+            .map_err(std::io::Error::other)
+    } else {
+        let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+        tar.set_preserve_permissions(true);
+        tar.unpack(dest)
+    }
 }
 
 fn unsupported(asset: &str) -> ZemError {
@@ -97,7 +111,13 @@ fn unsupported(asset: &str) -> ZemError {
 mod tests {
     use super::*;
 
-    /// A tar.gz laid out like a uv release, with a fake `uv` inside.
+    const FAKE_UV: &[u8] = b"#!/bin/sh\necho uv 0.13.10\n";
+
+    fn uv_file_name() -> String {
+        platform::exe_name("uv").to_string_lossy().into_owned()
+    }
+
+    /// A tar.gz laid out like a Unix uv release, with a fake `uv` inside.
     fn fake_release(dir: &Path, target: &str) -> PathBuf {
         let archive = dir.join("uv.tar.gz");
         let gz = flate2::write::GzEncoder::new(
@@ -105,20 +125,45 @@ mod tests {
             flate2::Compression::fast(),
         );
         let mut builder = tar::Builder::new(gz);
-        let body = b"#!/bin/sh\necho uv 0.13.10\n";
         let mut header = tar::Header::new_gnu();
-        header.set_size(body.len() as u64);
+        header.set_size(FAKE_UV.len() as u64);
         header.set_mode(0o755);
         header.set_cksum();
         builder
             .append_data(
                 &mut header,
-                format!("uv-{target}/{}", platform::exe_name("uv").to_string_lossy()),
-                &body[..],
+                format!("uv-{target}/{}", uv_file_name()),
+                FAKE_UV,
             )
             .unwrap();
         builder.into_inner().unwrap().finish().unwrap();
         archive
+    }
+
+    /// A zip laid out like a Windows uv release: binaries at the top level.
+    fn fake_zip_release(dir: &Path) -> PathBuf {
+        use std::io::Write;
+
+        let archive = dir.join("uv.zip");
+        let mut zip = zip::ZipWriter::new(File::create(&archive).unwrap());
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for name in [uv_file_name(), "uvx.exe".to_string()] {
+            zip.start_file(name, options).unwrap();
+            zip.write_all(FAKE_UV).unwrap();
+        }
+        zip.finish().unwrap();
+        archive
+    }
+
+    #[test]
+    fn installs_a_flat_zip_release() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = ZemHome::new(tmp.path().join("zh"));
+        let archive = fake_zip_release(tmp.path());
+        install_archive(&home, &archive, "x86_64-pc-windows-msvc").unwrap();
+        assert_eq!(fs::read(home.uv_bin(UV_VERSION)).unwrap(), FAKE_UV);
+        assert!(home.uv_dir(UV_VERSION).join("uvx.exe").is_file());
     }
 
     #[test]
