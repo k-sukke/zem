@@ -18,10 +18,14 @@ struct Env {
 impl Env {
     fn new() -> Self {
         match std::env::var_os("ZEM_E2E_HOME") {
-            Some(home) => Env {
-                home: PathBuf::from(home),
-                _tmp_home: None,
-            },
+            Some(home) => {
+                // Tests run in parallel and canonicalize the home, so it must exist up front.
+                fs::create_dir_all(&home).unwrap();
+                Env {
+                    home: PathBuf::from(home),
+                    _tmp_home: None,
+                }
+            }
             None => {
                 let tmp = tempfile::tempdir().unwrap();
                 Env {
