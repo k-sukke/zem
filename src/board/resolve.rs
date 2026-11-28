@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use super::espressif::{self, SocInfo};
-use super::{Arch, BoardError, BoardId, SocId, known_board};
+use super::{Arch, BoardError, BoardId, SocId};
+use crate::vendor::{self, SocInfo, VendorProfile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +27,7 @@ impl ResolutionSource {
 pub struct ResolvedTarget {
     /// Passed verbatim to `west build -b`.
     pub board: String,
+    pub vendor: &'static VendorProfile,
     pub soc: SocId,
     pub arch: Arch,
     pub toolchains: Vec<String>,
@@ -44,33 +45,36 @@ pub fn resolve_static(
     arch_override: Option<Arch>,
 ) -> Result<ResolvedTarget, BoardError> {
     let id = BoardId::parse(input)?;
-    let known = known_board(&id.name);
+    let known = vendor::find_board(&id.name);
 
-    let (soc, source, board): (&SocInfo, _, _) = if let Some(qualifier) = id.soc() {
-        let soc = espressif::soc_info(qualifier).ok_or_else(|| BoardError::UnsupportedSoc {
-            board: input.trim().to_string(),
-            soc: qualifier.to_string(),
-        })?;
-        if let Some(k) = known.filter(|k| k.soc != soc.name) {
-            return Err(BoardError::SocMismatch {
-                board: id.name.clone(),
-                expected: k.soc.to_string(),
-                actual: qualifier.to_string(),
-            });
-        }
-        (soc, ResolutionSource::Qualifier, id.clone())
-    } else if let Some(k) = known {
-        let board = match k.default_qualifiers {
-            Some(q) => id.with_qualifiers(q),
-            None => id.clone(),
+    let ((vendor, soc), source, board): ((&VendorProfile, &SocInfo), _, _) =
+        if let Some(qualifier) = id.soc() {
+            let found = vendor::find_soc(qualifier).ok_or_else(|| BoardError::UnsupportedSoc {
+                board: input.trim().to_string(),
+                soc: qualifier.to_string(),
+            })?;
+            if let Some((_, k)) = known.filter(|(_, k)| k.soc != found.1.name) {
+                return Err(BoardError::SocMismatch {
+                    board: id.name.clone(),
+                    expected: k.soc.to_string(),
+                    actual: qualifier.to_string(),
+                });
+            }
+            (found, ResolutionSource::Qualifier, id.clone())
+        } else if let Some((vendor, k)) = known {
+            let board = match k.default_qualifiers {
+                Some(q) => id.with_qualifiers(q),
+                None => id.clone(),
+            };
+            let soc = vendor
+                .soc(k.soc)
+                .expect("known boards use their vendor's SoCs");
+            ((vendor, soc), ResolutionSource::StaticTable, board)
+        } else if let Some(found) = vendor::soc_from_board_prefix(&id.name) {
+            (found, ResolutionSource::Heuristic, id.clone())
+        } else {
+            return Err(BoardError::Unknown(input.trim().to_string()));
         };
-        let soc = espressif::soc_info(k.soc).expect("known boards use known SoCs");
-        (soc, ResolutionSource::StaticTable, board)
-    } else if let Some(soc) = espressif::soc_from_board_prefix(&id.name) {
-        (soc, ResolutionSource::Heuristic, id.clone())
-    } else {
-        return Err(BoardError::Unknown(input.trim().to_string()));
-    };
 
     if let Some(requested) = arch_override.filter(|a| *a != soc.arch) {
         return Err(BoardError::ArchMismatch {
@@ -84,11 +88,12 @@ pub fn resolve_static(
     let normalized_from = (board != input.trim()).then(|| input.trim().to_string());
     Ok(ResolvedTarget {
         board,
+        vendor,
         soc: SocId::new(soc.name),
         arch: soc.arch,
         toolchains: vec![soc.toolchain.to_string()],
-        hal_modules: vec!["hal_espressif".to_string()],
-        blob_modules: vec!["hal_espressif".to_string()],
+        hal_modules: vendor.hal_modules.iter().map(|m| m.to_string()).collect(),
+        blob_modules: vendor.blob_modules.iter().map(|m| m.to_string()).collect(),
         source,
         normalized_from,
     })

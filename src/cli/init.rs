@@ -8,10 +8,11 @@ use console::style;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 
 use super::Context;
-use crate::board::{self, KNOWN_BOARDS};
+use crate::board;
 use crate::config::{self, CONFIG_FILE_NAME, Feature, InitParams};
 use crate::error::{Result, ZemError};
 use crate::project;
+use crate::vendor;
 
 pub const DEFAULT_ZEPHYR_VERSION: &str = "v4.2.0";
 const GITIGNORE_ENTRIES: &[&str] = &["build/"];
@@ -128,7 +129,8 @@ pub fn run(ctx: &Context, args: InitArgs) -> Result<ExitCode> {
 }
 
 fn prompt_board(theme: &ColorfulTheme) -> Result<String> {
-    let mut items: Vec<String> = KNOWN_BOARDS
+    let boards: Vec<_> = vendor::known_boards().collect();
+    let mut items: Vec<String> = boards
         .iter()
         .map(|b| format!("{:<34} {}", b.full_name(), b.description))
         .collect();
@@ -141,7 +143,7 @@ fn prompt_board(theme: &ColorfulTheme) -> Result<String> {
         .interact()
         .map_err(ZemError::Prompt)?;
 
-    match KNOWN_BOARDS.get(choice) {
+    match boards.get(choice) {
         Some(board) => Ok(board.full_name()),
         None => Input::with_theme(theme)
             .with_prompt("Board name")

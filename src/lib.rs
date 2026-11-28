@@ -17,5 +17,6 @@ pub mod session;
 pub mod store;
 pub mod sync;
 pub mod tools;
+pub mod vendor;
 
 pub use error::{Result, ZemError};

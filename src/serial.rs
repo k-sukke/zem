@@ -1,4 +1,4 @@
-//! USB serial ports, the way ESP boards show up on every OS (CP210x, CH34x, native USB-JTAG).
+//! USB serial ports of development boards on every OS (CP210x, CH34x, on-chip USB, ...).
 
 use serialport::{SerialPortType, UsbPortInfo};
 
@@ -20,15 +20,13 @@ impl UsbPort {
     }
 }
 
-/// USB-to-UART bridges and on-chip USB found on ESP development boards.
+/// Common USB-to-UART bridges first, then devices listed by the vendor profiles.
 fn known_bridge(vid: u16, pid: u16) -> Option<&'static str> {
     match (vid, pid) {
         (0x10c4, 0xea60) => Some("CP210x"),
         (0x1a86, 0x7523) | (0x1a86, 0x55d4) => Some("CH34x"),
         (0x0403, _) => Some("FTDI"),
-        (0x303a, 0x1001) => Some("ESP USB-Serial/JTAG"),
-        (0x303a, _) => Some("Espressif USB"),
-        _ => None,
+        _ => crate::vendor::usb_name(vid, pid),
     }
 }
 

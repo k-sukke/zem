@@ -472,6 +472,7 @@ mod tests {
             zem_home: f.home.root().to_path_buf(),
             target: TargetState {
                 board: "b".into(),
+                vendor: "espressif".into(),
                 soc: "esp32c3".into(),
                 arch: Arch::Riscv,
                 toolchains: vec![toolchain.into()],

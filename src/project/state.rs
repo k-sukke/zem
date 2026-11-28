@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ProjectDir;
 use crate::board::{Arch, ResolutionSource};
-use crate::error::Result;
+use crate::error::{Result, ZemError};
 use crate::fsutil;
 
 pub const STATE_SCHEMA: u32 = 1;
@@ -33,6 +33,7 @@ pub struct ProjectState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetState {
     pub board: String,
+    pub vendor: String,
     pub soc: String,
     pub arch: Arch,
     pub toolchains: Vec<String>,
@@ -67,8 +68,15 @@ impl ProjectDir {
         self.state_dir().join(STATE_FILE)
     }
 
+    /// A state file zem cannot read (e.g. written by another zem version) only means the
+    /// project needs a sync: `zem sync` rewrites it.
     pub fn read_state(&self) -> Result<Option<ProjectState>> {
-        fsutil::read_json(&self.state_path())
+        fsutil::read_json(&self.state_path()).map_err(|e| match e {
+            ZemError::CorruptState { path, message } => ZemError::NotSynced {
+                reason: format!("{} cannot be read ({message})", path.display()),
+            },
+            other => other,
+        })
     }
 
     pub fn write_state(&self, state: &ProjectState) -> Result<()> {
@@ -97,6 +105,7 @@ mod tests {
             zem_home: home.root().to_path_buf(),
             target: TargetState {
                 board: "esp32c3_devkitm".into(),
+                vendor: "espressif".into(),
                 soc: "esp32c3".into(),
                 arch: Arch::Riscv,
                 toolchains: vec!["riscv64-zephyr-elf".into()],
@@ -120,5 +129,18 @@ mod tests {
         };
         project.write_state(&state).unwrap();
         assert_eq!(project.read_state().unwrap(), Some(state));
+    }
+
+    #[test]
+    fn unreadable_state_asks_for_a_sync() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = ZemHome::new(tmp.path().join("zh"));
+        let project = ProjectDir::new(tmp.path(), &home).unwrap();
+        project.ensure_state_dir().unwrap();
+        std::fs::write(project.state_path(), "{\"schema\": 1}").unwrap();
+        assert!(matches!(
+            project.read_state(),
+            Err(ZemError::NotSynced { .. })
+        ));
     }
 }
