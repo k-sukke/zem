@@ -130,16 +130,13 @@ pub fn validate(cfg: &ZemConfig) -> Result<Validated> {
 
     let target = board::resolve_static(&cfg.target.board, cfg.target.arch)?;
     if let (RevisionKind::Release { major, minor, .. }, Some(absent)) =
-        (&revision, target.soc.absent_through())
+        (&revision, board::soc_absent_through(&target.soc))
         && (*major, *minor) <= absent
     {
         return Err(ZemError::ConfigInvalid {
             problems: vec![format!(
                 "{} is not supported by Zephyr {} (first available after v{}.{})",
-                target.soc.name(),
-                cfg.zephyr.version,
-                absent.0,
-                absent.1
+                target.soc, cfg.zephyr.version, absent.0, absent.1
             )],
         });
     }

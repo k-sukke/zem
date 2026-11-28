@@ -125,12 +125,7 @@ impl SyncPlan {
             ("board", t.board.clone()),
             (
                 "soc / arch",
-                format!(
-                    "{} / {} (via {})",
-                    t.soc.name(),
-                    t.arch,
-                    t.source.describe()
-                ),
+                format!("{} / {} (via {})", t.soc, t.arch, t.source.describe()),
             ),
             ("toolchains", t.toolchains.join(", ")),
             ("modules", modules.join(", ")),

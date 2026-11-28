@@ -109,7 +109,7 @@ pub fn run(ctx: &Context, args: InitArgs) -> Result<ExitCode> {
     println!(
         "  board  {}\n  target {} / {} → {}",
         target.board,
-        target.soc.name(),
+        target.soc,
         target.arch,
         target.toolchains.join(", ")
     );

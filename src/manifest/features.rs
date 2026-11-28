@@ -19,9 +19,14 @@ pub fn project_modules(config: &ZemConfig, target: &ResolvedTarget) -> BTreeSet<
     target
         .hal_modules
         .iter()
-        .copied()
-        .chain(config.modules.features.iter().map(|f| module_for(*f)))
-        .map(str::to_string)
+        .cloned()
+        .chain(
+            config
+                .modules
+                .features
+                .iter()
+                .map(|f| module_for(*f).to_string()),
+        )
         .chain(config.modules.extra.iter().cloned())
         .collect()
 }

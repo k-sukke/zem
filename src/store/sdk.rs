@@ -44,10 +44,10 @@ pub fn minimal_installed(sdk_dir: &Path) -> bool {
             .is_file()
 }
 
-pub fn missing_toolchains<'a>(sdk_dir: &Path, toolchains: &[&'a str]) -> Vec<&'a str> {
+pub fn missing_toolchains<'a, S: AsRef<str>>(sdk_dir: &Path, toolchains: &'a [S]) -> Vec<&'a str> {
     toolchains
         .iter()
-        .copied()
+        .map(AsRef::as_ref)
         .filter(|tc| !toolchain_gcc(sdk_dir, tc).is_file())
         .collect()
 }
@@ -91,7 +91,7 @@ impl SdkStore<'_> {
         format!("{RELEASE_BASE}/v{}/{asset}", self.version)
     }
 
-    pub fn ensure(&self, toolchains: &[&str]) -> Result<SdkOutcome> {
+    pub fn ensure<S: AsRef<str>>(&self, toolchains: &[S]) -> Result<SdkOutcome> {
         let dir = self.dir();
         let _lock = lock(self.home, &format!("sdk-{}", self.version))?;
         let missing = missing_toolchains(&dir, toolchains);
