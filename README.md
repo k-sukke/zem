@@ -225,7 +225,8 @@ Set-ExecutionPolicy -Scope Process RemoteSigned
 Use `-Scope CurrentUser` to keep the setting. A policy set by Group Policy takes precedence and cannot be changed this
 way. `zem shell` and `activate.bat` do not need any of this.
 
-Serial ports are `COM` names there, e.g. `zem west flash --esp-device COM3`.
+Serial ports are `COM` names there, e.g. `zem west flash --esp-device COM3`. Leave `west espressif monitor` with
+Ctrl+]: on Windows, Ctrl+C reaches the monitor as an interrupt, which it forwards to the device instead of exiting.
 
 ## Commands
 
