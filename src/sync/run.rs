@@ -245,11 +245,14 @@ fn run_steps(
     // The tree is the source of truth for the board. Boards zem could not resolve from the
     // name alone are found here, and their HAL is added to the workspace afterwards.
     steps.begin("Board");
-    let input = plan
-        .target
-        .as_ref()
-        .map_or(plan.board.as_str(), |t| t.board.as_str());
-    let target = board_yml::resolve(&ws.zephyr_base, input, cfg.target.arch, &cfg.zephyr.version)?;
+    // Resolve what zem.toml says, not the statically expanded name, so a wrong static guess
+    // cannot override the tree.
+    let target = board_yml::resolve(
+        &ws.zephyr_base,
+        &plan.board,
+        cfg.target.arch,
+        &cfg.zephyr.version,
+    )?;
     if let Some(expected) = plan.target.as_ref().filter(|t| t.soc != target.soc) {
         eprintln!(
             "{} zem expected SoC {} for `{}`, but the Zephyr tree says {}; using {}",
