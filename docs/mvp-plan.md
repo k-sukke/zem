@@ -1,6 +1,7 @@
 # zem (Zephyr Environment Manager) — MVP 実装計画
 
-> ステータス: **Phase 3 完了**。`init → sync → build` が esp32 / esp32s3 / esp32c3 / esp32c6 で通り、ESP32 実機への書き込みと起動を確認済み。実装メモは各 Phase の「実装結果」、スパイクの結果は §9
+> ステータス: **完了（アーカイブ）**。MVP（ESP32 系、macOS / Linux / Windows）の設計と各 Phase の実装メモを記録として残している。旧 `PLAN.md`。
+> §0 設計方針・§4 ZEM_HOME の設計・§7 クロスプラットフォーム規約は現在も有効。対応 MCU の拡張については [multi-mcu-readiness.md](multi-mcu-readiness.md) を参照
 > 対象ボード: ESP32 系（Xtensa: ESP32 / S2 / S3、RISC-V: C3 / C6 / H2）
 > 対象 Zephyr: **v4.0 以降**
 > ホスト OS: **設計はクロスプラットフォーム前提**（macOS / Linux / Windows）。**MVP の動作保証は macOS と Linux のみ**で、Windows 対応は MVP 後の Phase 5 で行う
@@ -29,7 +30,7 @@
 ```
 zem/
 ├── Cargo.toml
-├── PLAN.md
+├── docs/mvp-plan.md     # この文書（旧 PLAN.md）
 ├── src/
 │   ├── main.rs              # エントリポイント。clap のパース → cli::dispatch のみ
 │   ├── lib.rs

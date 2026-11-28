@@ -1,5 +1,5 @@
 #!/bin/sh
-# OS-specific code must live in src/platform/ only (see PLAN.md §7).
+# OS-specific code must live in src/platform/ only (see docs/mvp-plan.md §7).
 set -eu
 cd "$(dirname "$0")/.."
 
