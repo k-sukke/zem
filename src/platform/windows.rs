@@ -8,6 +8,8 @@ use super::{InstallHint, Os, SerialAccess};
 pub const EXE_SUFFIX: &str = ".exe";
 pub const SDK_ARCHIVE_EXT: &str = ".7z";
 pub const UV_ARCHIVE_EXT: &str = ".zip";
+pub const SCRIPT_PATHEXT: &[&str] = &[".PY"];
+pub const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC";
 pub const VENV_BIN_DIR: &str = "Scripts";
 
 pub const STRICT_ENV_ALLOWLIST: &[&str] = &[

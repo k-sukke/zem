@@ -92,6 +92,18 @@ pub fn venv_bin_dir(venv: &Path) -> PathBuf {
     venv.join(imp::VENV_BIN_DIR)
 }
 
+/// Extensions zem adds to `PATHEXT` in its environments. Zephyr's west runners check scripts
+/// such as `esptool.py` with `shutil.which`, which on Windows only accepts files whose
+/// extension is in `PATHEXT`, so `west flash` failed with "esptool.py not found".
+pub fn script_pathext() -> &'static [&'static str] {
+    imp::SCRIPT_PATHEXT
+}
+
+/// Windows' own `PATHEXT`, used when the variable is unset.
+pub fn default_pathext() -> &'static str {
+    imp::DEFAULT_PATHEXT
+}
+
 pub fn venv_python(venv: &Path) -> PathBuf {
     venv_bin_dir(venv).join(exe_name("python"))
 }
