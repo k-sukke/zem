@@ -130,8 +130,59 @@ fn batch_caret_escape(value: &str) -> String {
     out
 }
 
+/// A name every shell can set: `[A-Za-z_][A-Za-z0-9_]*`. `[env]` names must look like this,
+/// since one `zem.toml` is shared between POSIX shells, fish, PowerShell and cmd.
+pub fn is_portable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Whether `shell` can take `name` as written into its syntax. Names are not quoted in POSIX
+/// and fish output, so anything else could run as a command. PowerShell and cmd also accept
+/// Windows names such as `PROGRAMFILES(X86)`; their output quotes or escapes the name, and only
+/// control characters (a line break would start another command) are refused. Names come from
+/// the process environment too, so this is checked here and not only in config validation.
+fn name_allowed(name: &str, shell: ShellKind) -> bool {
+    match shell {
+        ShellKind::Posix | ShellKind::Fish => is_portable_name(name),
+        ShellKind::PowerShell | ShellKind::Cmd => {
+            !name.is_empty() && !name.contains('=') && !name.contains(char::is_control)
+        }
+        ShellKind::Json => true,
+    }
+}
+
 pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
+    let skipped = diff
+        .unset
+        .iter()
+        .chain(diff.set.keys())
+        .filter(|k| !name_allowed(k, shell))
+        .count();
+    let diff = &EnvDiff {
+        set: diff
+            .set
+            .iter()
+            .filter(|(k, _)| name_allowed(k, shell))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        unset: diff
+            .unset
+            .iter()
+            .filter(|k| name_allowed(k, shell))
+            .cloned()
+            .collect(),
+    };
     let mut out = String::new();
+    if skipped > 0 {
+        let comment = if shell == ShellKind::Cmd { "@rem" } else { "#" };
+        out.push_str(&format!(
+            "{comment} zem: skipped {skipped} variable(s) whose names this shell cannot use\n"
+        ));
+    }
     match shell {
         ShellKind::Posix => {
             for key in &diff.unset {
@@ -305,6 +356,52 @@ mod tests {
         @set PROGRAMFILES^(X86^)=C:\Program Files ^(x86^)
         @set ZEPHYR_BASE=C:\Users\it's me\100%%\zephyr
         "#);
+    }
+
+    #[test]
+    fn names_that_would_run_as_commands_are_skipped() {
+        let current = EnvBuilder::from_vars([("OLD\nrm -rf ~", "x")]);
+        let target = EnvBuilder::from_vars([
+            ("GOOD", "1"),
+            ("A;touch x", "1"),
+            ("X\necho INJECTED\nREM", "1"),
+            ("PROGRAMFILES(X86)", "C:\\pf"),
+        ]);
+        let d = diff(&current, &target);
+        for shell in [ShellKind::Posix, ShellKind::Fish] {
+            let out = render(&d, shell);
+            assert!(out.starts_with("# zem: skipped 4 variable(s)"), "{out}");
+            assert!(out.contains("GOOD"), "{out}");
+            assert!(!out.contains("touch") && !out.contains("INJECTED"), "{out}");
+            assert!(!out.contains("rm -rf") && !out.contains("X86"), "{out}");
+        }
+        for shell in [ShellKind::PowerShell, ShellKind::Cmd] {
+            let out = render(&d, shell);
+            assert!(out.contains("skipped 2 variable(s)"), "{out}");
+            assert!(
+                !out.contains("INJECTED") && !out.contains("rm -rf"),
+                "{out}"
+            );
+            assert!(out.contains("PROGRAMFILES"), "{out}");
+        }
+        assert!(render(&d, ShellKind::Json).contains("INJECTED"));
+    }
+
+    #[test]
+    fn portable_names() {
+        assert!(is_portable_name("ESPTOOL_PORT") && is_portable_name("_x1"));
+        for bad in [
+            "",
+            "1A",
+            "A-B",
+            "A B",
+            "A;B",
+            "A\nB",
+            "PROGRAMFILES(X86)",
+            "É",
+        ] {
+            assert!(!is_portable_name(bad), "{bad:?}");
+        }
     }
 
     #[test]
