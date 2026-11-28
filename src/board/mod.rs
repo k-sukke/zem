@@ -20,7 +20,7 @@ pub fn soc_absent_through(soc: &SocId) -> Option<(u32, u32)> {
     espressif::soc_info(soc.as_str()).and_then(|info| info.absent_through)
 }
 
-/// CPU architecture, one per directory under Zephyr's `arch/`.
+/// CPU architecture, one per directory under Zephyr's `arch/` (v4.0 and later).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Arch {
@@ -28,7 +28,6 @@ pub enum Arch {
     Arm,
     Arm64,
     Mips,
-    Nios2,
     Posix,
     Riscv,
     Rx,
@@ -44,7 +43,6 @@ impl Arch {
             Arch::Arm => "arm",
             Arch::Arm64 => "arm64",
             Arch::Mips => "mips",
-            Arch::Nios2 => "nios2",
             Arch::Posix => "posix",
             Arch::Riscv => "riscv",
             Arch::Rx => "rx",
@@ -137,8 +135,7 @@ mod tests {
     #[test]
     fn arch_serde_matches_zephyr_arch_dirs() {
         for name in [
-            "arc", "arm", "arm64", "mips", "nios2", "posix", "riscv", "rx", "sparc", "x86",
-            "xtensa",
+            "arc", "arm", "arm64", "mips", "posix", "riscv", "rx", "sparc", "x86", "xtensa",
         ] {
             let arch: Arch = serde_json::from_value(serde_json::json!(name)).unwrap();
             assert_eq!(arch.as_str(), name);

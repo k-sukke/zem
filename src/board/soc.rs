@@ -5,7 +5,7 @@ use std::fmt;
 /// SoCs are an open set defined by the Zephyr tree, so this is a name rather than an enum.
 /// Values are only created inside `board`, from a board qualifier, `soc.yml` or a vendor
 /// table, so a `SocId` always comes from somewhere that names a SoC.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SocId(String);
 
 impl SocId {
