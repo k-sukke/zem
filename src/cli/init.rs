@@ -120,7 +120,9 @@ pub fn run(ctx: &Context, args: InitArgs) -> Result<ExitCode> {
         ),
         None => println!(
             "  board  {board}\n  target looked up in the Zephyr tree by `zem sync` \
-             (zem cannot tell the SoC from the name)"
+             (zem cannot tell the SoC from the name)\n  note   zem supports these SoCs: {}; \
+             for any other SoC, `zem sync` stops at the Board step",
+            vendor::supported_socs()
         ),
     }
     for warning in validated
@@ -141,7 +143,7 @@ fn prompt_board(theme: &ColorfulTheme) -> Result<String> {
     let boards: Vec<_> = vendor::known_boards().collect();
     let mut items: Vec<String> = boards
         .iter()
-        .map(|b| format!("{:<34} {}", b.full_name(), b.description))
+        .map(|(v, b)| format!("{:<34} {}", v.board_target(b), b.description))
         .collect();
     items.push("Other (type a board name)".to_string());
 
@@ -153,7 +155,7 @@ fn prompt_board(theme: &ColorfulTheme) -> Result<String> {
         .map_err(ZemError::Prompt)?;
 
     match boards.get(choice) {
-        Some(board) => Ok(board.full_name()),
+        Some((v, board)) => Ok(v.board_target(board)),
         None => Input::with_theme(theme)
             .with_prompt("Board name")
             .interact_text()

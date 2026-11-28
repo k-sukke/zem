@@ -166,9 +166,21 @@ pub fn valid_targets(board: &BoardEntry, soc: &BoardSoc, clusters: &[String]) ->
     targets
 }
 
+/// The CPU cluster a name without one targets: the only cluster, or the vendor profile's
+/// default for the SoC. With several clusters and no default the user has to pick one.
+fn default_cluster<'a>(clusters: &'a [String], profile_default: Option<&str>) -> Option<&'a str> {
+    match clusters {
+        [only] => Some(only),
+        _ => clusters
+            .iter()
+            .find(|c| Some(c.as_str()) == profile_default)
+            .map(String::as_str),
+    }
+}
+
 /// Resolve `input` against the Zephyr tree: the board must exist, have the SoC, and name a
 /// valid build target. A bare name of a single-SoC board picks that SoC, and a name without a
-/// CPU cluster on a multi-core SoC gets the SoC's first cluster (`procpu`, `cpuapp`, ...).
+/// CPU cluster gets the SoC's only cluster or the vendor profile's default (`procpu`, ...).
 /// The SoC must belong to a vendor profile, which supplies the toolchain and HAL modules.
 pub fn resolve(
     zephyr_base: &Path,
@@ -211,6 +223,11 @@ pub fn resolve(
                 }
             },
         };
+    let (vendor, info) = vendor::find_soc(&soc.name).ok_or_else(|| BoardError::UnsupportedSoc {
+        board: input.trim().to_string(),
+        soc: soc.name.clone(),
+        supported: vendor::supported_socs(),
+    })?;
     let clusters = soc_cpuclusters(zephyr_base, &soc.name);
     let valid = valid_targets(&board, soc, &clusters);
 
@@ -223,8 +240,10 @@ pub fn resolve(
     };
     let target = if is_valid(&id) {
         id.clone()
-    } else if id.qualifiers.len() <= 1 && !clusters.is_empty() {
-        id.with_qualifiers(&format!("{}/{}", soc.name, clusters[0]))
+    } else if let Some(cluster) =
+        default_cluster(&clusters, info.default_cpucluster).filter(|_| id.qualifiers.len() <= 1)
+    {
+        id.with_qualifiers(&format!("{}/{cluster}", soc.name))
     } else {
         return Err(BoardError::InvalidTarget {
             board: input.trim().to_string(),
@@ -232,11 +251,6 @@ pub fn resolve(
         });
     };
 
-    let (vendor, info) = vendor::find_soc(&soc.name).ok_or_else(|| BoardError::UnsupportedSoc {
-        board: input.trim().to_string(),
-        soc: soc.name.clone(),
-        supported: vendor::supported_socs(),
-    })?;
     build(
         input,
         &target,
@@ -399,5 +413,38 @@ mod tests {
             resolve(tree.path(), "m5stack_atoms3", Some(Arch::Riscv), "v4.2.0"),
             Err(BoardError::ArchMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn default_cluster_needs_a_single_cluster_or_a_profile_default() {
+        let clusters = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(default_cluster(&clusters(&["m4"]), None), Some("m4"));
+        assert_eq!(
+            default_cluster(&clusters(&["procpu", "appcpu"]), Some("procpu")),
+            Some("procpu")
+        );
+        // The soc.yml order does not decide: mimx8ml8 lists its DSP first.
+        assert_eq!(
+            default_cluster(&clusters(&["adsp", "a53", "m7"]), None),
+            None
+        );
+        assert_eq!(default_cluster(&clusters(&["a", "b"]), Some("c")), None);
+        assert_eq!(default_cluster(&[], Some("procpu")), None);
+    }
+
+    #[test]
+    fn profile_defaults_exist_in_the_tree() {
+        let tree = fixtures::zephyr_tree();
+        // Every default must be one of the SoC's clusters (the fixture mirrors v4.2.0).
+        for soc in crate::vendor::VENDORS.iter().flat_map(|v| v.socs) {
+            if let Some(cluster) = soc.default_cpucluster {
+                let clusters = soc_cpuclusters(tree.path(), soc.name);
+                assert!(
+                    clusters.iter().any(|c| c == cluster),
+                    "{}: {clusters:?}",
+                    soc.name
+                );
+            }
+        }
     }
 }

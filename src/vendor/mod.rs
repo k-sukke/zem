@@ -44,6 +44,14 @@ impl VendorProfile {
     pub fn soc(&self, name: &str) -> Option<&'static SocInfo> {
         self.socs.iter().find(|soc| soc.name == name)
     }
+
+    /// Full `west build -b` target of one of this vendor's known boards.
+    pub fn board_target(&self, board: &KnownBoard) -> String {
+        match self.soc(board.soc).and_then(SocInfo::default_qualifiers) {
+            Some(q) => format!("{}/{q}", board.name),
+            None => board.name.to_string(),
+        }
+    }
 }
 
 /// What zem knows about a SoC before a Zephyr tree is available.
@@ -53,24 +61,24 @@ pub struct SocInfo {
     pub arch: Arch,
     /// Zephyr SDK toolchain directory / `west sdk install -t` name.
     pub toolchain: &'static str,
+    /// CPU cluster a board name without one targets, for SoCs with several clusters
+    /// (`procpu` on ESP32). The order in soc.yml says nothing about which core is the main one.
+    pub default_cpucluster: Option<&'static str>,
+}
+
+impl SocInfo {
+    /// `soc/cluster` qualifiers appended to a bare board name, if the SoC needs them.
+    pub fn default_qualifiers(&self) -> Option<String> {
+        self.default_cpucluster
+            .map(|cluster| format!("{}/{cluster}", self.name))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KnownBoard {
     pub name: &'static str,
     pub soc: &'static str,
-    /// Qualifiers appended when the user gives only the bare name (multi-core SoCs need them).
-    pub default_qualifiers: Option<&'static str>,
     pub description: &'static str,
-}
-
-impl KnownBoard {
-    pub fn full_name(&self) -> String {
-        match self.default_qualifiers {
-            Some(q) => format!("{}/{}", self.name, q),
-            None => self.name.to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,24 +126,24 @@ impl UsbId {
     }
 }
 
-const fn soc(name: &'static str, arch: Arch, toolchain: &'static str) -> SocInfo {
+const fn soc(
+    name: &'static str,
+    arch: Arch,
+    toolchain: &'static str,
+    default_cpucluster: Option<&'static str>,
+) -> SocInfo {
     SocInfo {
         name,
         arch,
         toolchain,
+        default_cpucluster,
     }
 }
 
-const fn board(
-    name: &'static str,
-    soc: &'static str,
-    default_qualifiers: Option<&'static str>,
-    description: &'static str,
-) -> KnownBoard {
+const fn board(name: &'static str, soc: &'static str, description: &'static str) -> KnownBoard {
     KnownBoard {
         name,
         soc,
-        default_qualifiers,
         description,
     }
 }
@@ -164,8 +172,10 @@ pub fn supported_socs() -> String {
         .join(", ")
 }
 
-pub fn known_boards() -> impl Iterator<Item = &'static KnownBoard> {
-    VENDORS.iter().flat_map(|v| v.boards)
+pub fn known_boards() -> impl Iterator<Item = (&'static VendorProfile, &'static KnownBoard)> {
+    VENDORS
+        .iter()
+        .flat_map(|v| v.boards.iter().map(move |b| (*v, b)))
 }
 
 /// Longest SoC name that the board name equals or starts with followed by `_`
@@ -229,7 +239,7 @@ mod tests {
             .flat_map(|v| v.socs)
             .map(|s| s.name)
             .collect();
-        let mut boards: Vec<_> = known_boards().map(|b| b.name).collect();
+        let mut boards: Vec<_> = known_boards().map(|(_, b)| b.name).collect();
         let (n_socs, n_boards) = (socs.len(), boards.len());
         socs.sort_unstable();
         socs.dedup();
@@ -245,9 +255,6 @@ mod tests {
         for vendor in VENDORS {
             for b in vendor.boards {
                 assert!(vendor.soc(b.soc).is_some(), "{}", b.name);
-                if let Some(q) = b.default_qualifiers {
-                    assert_eq!(q.split('/').next(), Some(b.soc), "{}", b.name);
-                }
             }
         }
     }

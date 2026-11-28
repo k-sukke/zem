@@ -34,79 +34,46 @@ pub const PROFILE: VendorProfile = VendorProfile {
 const RISCV: &str = "riscv64-zephyr-elf";
 
 const SOCS: &[SocInfo] = &[
-    soc("esp32", Arch::Xtensa, "xtensa-espressif_esp32_zephyr-elf"),
+    soc(
+        "esp32",
+        Arch::Xtensa,
+        "xtensa-espressif_esp32_zephyr-elf",
+        Some("procpu"),
+    ),
     soc(
         "esp32s2",
         Arch::Xtensa,
         "xtensa-espressif_esp32s2_zephyr-elf",
+        None,
     ),
     soc(
         "esp32s3",
         Arch::Xtensa,
         "xtensa-espressif_esp32s3_zephyr-elf",
+        Some("procpu"),
     ),
-    soc("esp32c2", Arch::Riscv, RISCV),
-    soc("esp32c3", Arch::Riscv, RISCV),
-    soc("esp32c6", Arch::Riscv, RISCV),
-    soc("esp32h2", Arch::Riscv, RISCV),
+    soc("esp32c2", Arch::Riscv, RISCV, None),
+    soc("esp32c3", Arch::Riscv, RISCV, None),
+    soc("esp32c6", Arch::Riscv, RISCV, Some("hpcore")),
+    soc("esp32h2", Arch::Riscv, RISCV, None),
 ];
 
 /// Must be re-checked against `boards/espressif` of each supported Zephyr release.
 const BOARDS: &[KnownBoard] = &[
-    board(
-        "esp32_devkitc",
-        "esp32",
-        Some("esp32/procpu"),
-        "ESP32-DevKitC",
-    ),
-    board(
-        "esp32_ethernet_kit",
-        "esp32",
-        Some("esp32/procpu"),
-        "ESP32-Ethernet-Kit",
-    ),
-    board("esp32s2_saola", "esp32s2", None, "ESP32-S2-Saola-1"),
-    board("esp32s2_devkitc", "esp32s2", None, "ESP32-S2-DevKitC"),
-    board(
-        "esp32s3_devkitc",
-        "esp32s3",
-        Some("esp32s3/procpu"),
-        "ESP32-S3-DevKitC",
-    ),
-    board(
-        "esp32s3_devkitm",
-        "esp32s3",
-        Some("esp32s3/procpu"),
-        "ESP32-S3-DevKitM",
-    ),
-    board(
-        "esp8684_devkitm",
-        "esp32c2",
-        None,
-        "ESP8684-DevKitM (ESP32-C2)",
-    ),
-    board("esp32c3_devkitm", "esp32c3", None, "ESP32-C3-DevKitM"),
-    board("esp32c3_devkitc", "esp32c3", None, "ESP32-C3-DevKitC"),
-    board(
-        "esp32c6_devkitc",
-        "esp32c6",
-        Some("esp32c6/hpcore"),
-        "ESP32-C6-DevKitC",
-    ),
-    board("esp32h2_devkitm", "esp32h2", None, "ESP32-H2-DevKitM"),
-    board(
-        "xiao_esp32s3",
-        "esp32s3",
-        Some("esp32s3/procpu"),
-        "Seeed XIAO ESP32S3",
-    ),
-    board("xiao_esp32c3", "esp32c3", None, "Seeed XIAO ESP32C3"),
-    board(
-        "xiao_esp32c6",
-        "esp32c6",
-        Some("esp32c6/hpcore"),
-        "Seeed XIAO ESP32C6",
-    ),
+    board("esp32_devkitc", "esp32", "ESP32-DevKitC"),
+    board("esp32_ethernet_kit", "esp32", "ESP32-Ethernet-Kit"),
+    board("esp32s2_saola", "esp32s2", "ESP32-S2-Saola-1"),
+    board("esp32s2_devkitc", "esp32s2", "ESP32-S2-DevKitC"),
+    board("esp32s3_devkitc", "esp32s3", "ESP32-S3-DevKitC"),
+    board("esp32s3_devkitm", "esp32s3", "ESP32-S3-DevKitM"),
+    board("esp8684_devkitm", "esp32c2", "ESP8684-DevKitM (ESP32-C2)"),
+    board("esp32c3_devkitm", "esp32c3", "ESP32-C3-DevKitM"),
+    board("esp32c3_devkitc", "esp32c3", "ESP32-C3-DevKitC"),
+    board("esp32c6_devkitc", "esp32c6", "ESP32-C6-DevKitC"),
+    board("esp32h2_devkitm", "esp32h2", "ESP32-H2-DevKitM"),
+    board("xiao_esp32s3", "esp32s3", "Seeed XIAO ESP32S3"),
+    board("xiao_esp32c3", "esp32c3", "Seeed XIAO ESP32C3"),
+    board("xiao_esp32c6", "esp32c6", "Seeed XIAO ESP32C6"),
 ];
 
 #[cfg(test)]

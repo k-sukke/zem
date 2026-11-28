@@ -26,7 +26,7 @@ const FILES: &[(&str, &str)] = &[
     ),
     (
         "soc/espressif/soc.yml",
-        "family:\n- name: espressif_esp32\n  series:\n  - name: esp32s3\n    socs:\n    - name: esp32s3\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32c3\n    socs:\n    - name: esp32c3\n",
+        "family:\n- name: espressif_esp32\n  series:\n  - name: esp32\n    socs:\n    - name: esp32\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32s3\n    socs:\n    - name: esp32s3\n      cpuclusters:\n      - name: procpu\n      - name: appcpu\n  - name: esp32c3\n    socs:\n    - name: esp32c3\n  - name: esp32c6\n    socs:\n    - name: esp32c6\n      cpuclusters:\n      - name: hpcore\n      - name: lpcore\n",
     ),
     // Nordic: two clusters, a TrustZone variant on the application core only.
     (

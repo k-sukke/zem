@@ -7,8 +7,8 @@
 
 ## 1. 現在地
 
-S1・S2・S8-1・S3 を実装し、PR #8〜#11 として**スタック**で出してある（いずれも未マージ、3 OS の CI は通過）。
-**#8〜#11 のセルフレビューと修正は完了**（§6）、振り返りの論点も結論が出た（§5）。次は #12（既定クラスタ・案内）と #13（アウトオブツリーのボード）を積み、その後 S4 へ進む。#8〜#11 は CodeRabbit のレビューと Linux / Windows の実機確認が済んだものから順にマージする。
+S1・S2・S8-1・S3 を実装し、PR #8〜#11 としてスタックで出した。**#8〜#11 は 2026-11-28 にマージ済み**（#8 は CodeRabbit のレビュー済み、#9〜#11 はセルフレビュー済み）。振り返りの結果は #12（base `main`）。
+次は #12 のマージ、#13（アウトオブツリーのボード）、その後 S4。以降の PR は**セルフレビュー → マージ**の流れで進める（ユーザー合意）。
 
 | PR | ブランチ | base | ステップ | 内容 |
 |---|---|---|---|---|
@@ -17,8 +17,10 @@ S1・S2・S8-1・S3 を実装し、PR #8〜#11 として**スタック**で出�
 | [#9](https://github.com/k-sukke/zem/pull/9) | `refactor/vendor-profile` | #8 | S2 + S6 | `src/vendor/` と `VendorProfile` を新設し、ESP32 固有の値（SoC・既知ボード・HAL・blobs・除外する環境変数と PATH・USB ID）を移動。`state.json` に `target.vendor` |
 | [#10](https://github.com/k-sukke/zem/pull/10) | `refactor/vendor-neutral-wording` | #9 | S8-1 | 複数ベンダーの偽 Zephyr ツリー（`src/board/fixtures.rs`）、`soc/**/soc.yml` の探索、`board.yml` の `vendor`、エラー文言とテンプレートの一般化 |
 | [#11](https://github.com/k-sukke/zem/pull/11) | `feat/tree-board-resolution` | #10 | S3 | 名前から SoC が分からないボードを sync 時にツリーから解決する 2 段 sync、CPU クラスタの補完、`absent_through` の削除、モジュールが空のときの `west.yml` の修正 |
+| [#12](https://github.com/k-sukke/zem/pull/12) | `feat/default-cpucluster` | `main` | 振り返り 2〜4 | 既定クラスタを `SocInfo.default_cpucluster` に一本化（`KnownBoard.default_qualifiers` を削除）、未対応 SoC の案内、E2E の ZEM_HOME 作成漏れの修正 |
 
-**マージ手順**: #8 から順にマージする。下の PR をマージすると、GitHub が次の PR の base を自動で付け替える（付け替わらない場合は `gh pr edit <n> --base main`）。
+**マージ手順（スタック）**: 下の PR からマージする。**次の PR の base を先に手動で `main` に付け替える**こと（`gh pr edit <n> --base main`）。
+このリポジトリはマージ後に head ブランチを自動削除する設定で、付け替え前に base ブランチが消えると次の PR が自動で閉じられる（#10 で発生。base ブランチを元のコミットで作り直して再オープンし、復旧した）。
 
 ## 2. 作業の進め方（合意事項）
 
@@ -40,6 +42,8 @@ S1・S2・S8-1・S3 を実装し、PR #8〜#11 として**スタック**で出�
 
 ## 4. 確認済みのこと
 
+- #11 時点の macOS で `cargo test --test e2e -- --ignored` の 2 本（ホスト環境から分離したビルド、ワークスペース共有とモジュールの追加）が通過。
+
 - 各 PR で clippy・単体テスト・CLI テスト・platform 境界チェックが通過。GitHub Actions の Linux / macOS / Windows もすべて通過。
 - 実機（XIAO ESP32C3、macOS）で #8・#9・#10・#11 それぞれの `init → sync → build → flash` と起動を確認。
 - #9: シェルに `IDF_PATH` / `IDF_TOOLS_PATH` がある状態で、doctor が警告し、ビルドには混入しない。
@@ -51,11 +55,11 @@ S1・S2・S8-1・S3 を実装し、PR #8〜#11 として**スタック**で出�
 
 | # | 論点 | 結論 | 対応 |
 |---|---|---|---|
-| 1 | CodeRabbit が #8〜#11 をレビューしていない（base が `main` 以外の PR は対象外とみられる） | セルフレビュー（§6）を済ませたうえで、base が `main` に付け替わった PR から順に CodeRabbit のレビューを受ける | 進行中 |
-| 2 | プロファイルのない SoC のエラーが遅い（Zephyr 本体の取得後、初回は約 500 MB・40 秒） | 仕組みは足さず案内だけ改善。名前から SoC が分からないボードでは、`init` と `--dry-run` で対応している SoC と「それ以外は sync の Board ステップで止まる」ことを示す | #12 |
-| 3 | CPU クラスタの補完が `soc.yml` の最初のクラスタ頼み | v4.2.0 のマルチコア SoC 53 個を調べると、先頭が主コアでない例がある（`mimx8ml8` は `adsp`、`fu540` / `polarfire` は監視用の `e51`、`s32z270` は `rtu0` / `rtu1`）。順序での推測をやめ、`SocInfo` に SoC ごとの既定クラスタを持たせる。既定のない SoC でクラスタが省略されていれば、有効なターゲットを列挙してエラーにする | #12 |
-| 4 | 静的なボード表（`KnownBoard`）の役割 | `init` の候補一覧として残す。`default_qualifiers` は削除し、補完は 3 の `SocInfo` に一本化する。表の陳腐化は S8-2 の実ツリー照合テストで検出する | #12 |
-| 5 | 実機確認が macOS のみ | #11 で sync の流れが変わったため、マージ前に Linux（QEMU の Ubuntu）と Windows（UTM）でも確認する。VM はユーザーが操作する（`xiao_esp32c3` で init → sync → build → flash、加えて `ttgo_t8c3` の sync）。macOS の E2E は Claude が実行する | ユーザー確認待ち |
+| 1 | CodeRabbit が #8〜#11 をレビューしていない（base が `main` 以外の PR は対象外とみられる） | #8 は CodeRabbit のレビューで指摘なし。以降の PR はセルフレビュー → マージでよい（ユーザー合意） | 対応済み |
+| 2 | プロファイルのない SoC のエラーが遅い（Zephyr 本体の取得後、初回は約 500 MB・40 秒） | 仕組みは足さず案内だけ改善。名前から SoC が分からないボードでは、`init` と `--dry-run` で対応している SoC と「それ以外は sync の Board ステップで止まる」ことを示す | #12（対応済み） |
+| 3 | CPU クラスタの補完が `soc.yml` の最初のクラスタ頼み | v4.2.0 のマルチコア SoC 53 個を調べると、先頭が主コアでない例がある（`mimx8ml8` は `adsp`、`fu540` / `polarfire` は監視用の `e51`、`s32z270` は `rtu0` / `rtu1`）。順序での推測をやめ、`SocInfo` に SoC ごとの既定クラスタを持たせる。既定のない SoC でクラスタが省略されていれば、有効なターゲットを列挙してエラーにする | #12（対応済み） |
+| 4 | 静的なボード表（`KnownBoard`）の役割 | `init` の候補一覧として残す。`default_qualifiers` は削除し、補完は 3 の `SocInfo` に一本化する。表の陳腐化は S8-2 の実ツリー照合テストで検出する | #12（対応済み） |
+| 5 | 実機確認が macOS のみ | #11 で sync の流れが変わったため、マージ前に Linux（QEMU の Ubuntu）と Windows（UTM）でも確認する。VM はユーザーが操作する（`xiao_esp32c3` で init → sync → build → flash、加えて `ttgo_t8c3` の sync）。macOS の E2E は Claude が実行する | macOS の E2E（#11 時点）は 2 本とも通過。Linux / Windows はユーザー確認待ち |
 | 6 | アウトオブツリーのボード（アプリの `boards/`、モジュールの `board_root`）を sync が探さない | 自作ボードのプロジェクトが `NotInZephyr` で sync できず、実用上の障害になる。S3 の残りとして独立した PR にする。探索順はアプリの `boards/` → 有効なモジュールの `board_root` → `zephyr/boards` | #13（S4 の前） |
 
 ## 6. セルフレビュー記録
@@ -104,6 +108,14 @@ CodeRabbit がレビューしないため、#8 から順にセルフレビュー
 | 11-2 | 確認 | 2 回目の `workspace.ensure` に `opts.update` を渡していない | 1 回目で更新済みなので不要。現状維持 | 見送り |
 | 11-3 | 確認 | `state.json` の `target.source` は常に `board_yml` になり、`qualifier` などの値は `--dry-run` でしか見えない | 情報として十分。現状維持 | 見送り |
 
+### #12 振り返り 2〜4: 既定クラスタ・案内
+
+| # | 種別 | 指摘 | 方針 | 状態 |
+|---|---|---|---|---|
+| 12-1 | 要修正 | 既定クラスタがツリーに存在するかのテストが、フィクスチャに `esp32` / `esp32c6` のクラスタがないため黙って飛ばしていた | フィクスチャに v4.2.0 の `esp32`・`esp32c6` を足し、既定値を持つ SoC は必ず照合する | 対応済み |
+| 12-2 | 要修正 | ボード名の接頭辞から SoC を推測した場合にも既定の修飾子を付けるようになり、`zem init` が推測した名前を `zem.toml` に書き込んでいた。#11 の「`zem.toml` の値をツリーで解決する」方針と矛盾する | 推測の場合は名前をそのまま残す（sync でツリーが補う）。`esp32s3_eye` で init は名前のまま、sync で `/esp32s3/procpu` が補われることを確認 | 対応済み |
+| 12-3 | 確認 | ツリー解決で、ベンダーの判定をクラスタの検証より先に行うようにした | 未対応 SoC は修飾子の誤りより先に `unsupported_soc` で知らせるほうが分かりやすい。現状維持 | 見送り |
+
 ### まとめて直した対象（2026-11-28 対応済み）
 
 8-1, 8-2, 9-1, 9-2, 9-3, 10-1, 10-2, 10-3, 11-1。それぞれ該当 PR のブランチに修正コミットを積み、`git rebase --update-refs` で上のブランチを付け替えて force push した。
@@ -114,7 +126,7 @@ CodeRabbit がレビューしないため、#8 から順にセルフレビュー
 
 ## 7. 次の作業
 
-1. #12: `SocInfo` の既定クラスタ（`default_qualifiers` の削除）と、未対応 SoC の案内（§5 の 2〜4）。
+1. ~~#12: 既定クラスタと未対応 SoC の案内（§5 の 2〜4）~~ 対応済み。
 2. #13: アウトオブツリーのボードの探索（§5 の 6）。
 3. #8 から順にマージ（CodeRabbit のレビュー、Linux / Windows の実機確認の後）。
 4. S4: アーキテクチャごとの既定ツールチェーン＋プロファイルの上書き、SDK のバージョンごとの配置（`SdkLayout`）。SDK 1.x の実物の確認が先。

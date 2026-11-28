@@ -65,21 +65,31 @@ pub fn resolve_static(
             }
             (found, ResolutionSource::Qualifier, id.clone())
         } else if let Some((vendor, k)) = known {
-            let board = match k.default_qualifiers {
-                Some(q) => id.with_qualifiers(q),
-                None => id.clone(),
-            };
             let soc = vendor
                 .soc(k.soc)
                 .expect("known boards use their vendor's SoCs");
-            ((vendor, soc), ResolutionSource::StaticTable, board)
+            (
+                (vendor, soc),
+                ResolutionSource::StaticTable,
+                with_defaults(&id, soc),
+            )
         } else if let Some(found) = vendor::soc_from_board_prefix(&id.name) {
+            // Only a guess: keep the name as written and let the tree add qualifiers, so
+            // `zem init` does not write guessed qualifiers into zem.toml.
             (found, ResolutionSource::Heuristic, id.clone())
         } else {
             return Ok(None);
         };
 
     build(input, &board, vendor, soc, source, arch_override).map(Some)
+}
+
+/// A bare board name plus the SoC's default qualifiers, if it has any.
+fn with_defaults(id: &BoardId, soc: &SocInfo) -> BoardId {
+    match soc.default_qualifiers() {
+        Some(q) if id.qualifiers.is_empty() => id.with_qualifiers(&q),
+        _ => id.clone(),
+    }
 }
 
 /// The target for `board` (the full name passed to `west build -b`) on `soc` of `vendor`.
@@ -192,5 +202,15 @@ mod tests {
             resolve_static("esp32c3_devkitm", Some(Arch::Xtensa)),
             Err(BoardError::ArchMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn guessed_socs_keep_the_name_as_written() {
+        let t = resolve("esp32s3_custom");
+        assert_eq!(t.source, ResolutionSource::Heuristic);
+        assert_eq!(
+            (t.board.as_str(), t.normalized_from),
+            ("esp32s3_custom", None)
+        );
     }
 }
