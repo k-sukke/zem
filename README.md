@@ -215,6 +215,16 @@ On Windows, `zem shell` starts PowerShell (`pwsh` if installed), and the environ
 .zem\activate.bat     # cmd.exe
 ```
 
+Windows blocks PowerShell scripts by default (the `Restricted` execution policy), so `activate.ps1` fails until local
+scripts are allowed. To allow them for the current PowerShell session only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process RemoteSigned
+```
+
+Use `-Scope CurrentUser` to keep the setting. A policy set by Group Policy takes precedence and cannot be changed this
+way. `zem shell` and `activate.bat` do not need any of this.
+
 Serial ports are `COM` names there, e.g. `zem west flash --esp-device COM3`.
 
 ## Commands
