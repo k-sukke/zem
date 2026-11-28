@@ -5,6 +5,7 @@ use crate::board::Arch;
 
 pub const PROFILE: VendorProfile = VendorProfile {
     id: "espressif",
+    soc_dir: "espressif",
     socs: SOCS,
     boards: BOARDS,
     hal_modules: &["hal_espressif"],
@@ -31,31 +32,29 @@ pub const PROFILE: VendorProfile = VendorProfile {
     ],
 };
 
-const RISCV: &str = "riscv64-zephyr-elf";
-
 const SOCS: &[SocInfo] = &[
     soc(
         "esp32",
         Arch::Xtensa,
-        "xtensa-espressif_esp32_zephyr-elf",
+        Some("xtensa-espressif_esp32_zephyr-elf"),
         Some("procpu"),
     ),
     soc(
         "esp32s2",
         Arch::Xtensa,
-        "xtensa-espressif_esp32s2_zephyr-elf",
+        Some("xtensa-espressif_esp32s2_zephyr-elf"),
         None,
     ),
     soc(
         "esp32s3",
         Arch::Xtensa,
-        "xtensa-espressif_esp32s3_zephyr-elf",
+        Some("xtensa-espressif_esp32s3_zephyr-elf"),
         Some("procpu"),
     ),
-    soc("esp32c2", Arch::Riscv, RISCV, None),
-    soc("esp32c3", Arch::Riscv, RISCV, None),
-    soc("esp32c6", Arch::Riscv, RISCV, Some("hpcore")),
-    soc("esp32h2", Arch::Riscv, RISCV, None),
+    soc("esp32c2", Arch::Riscv, None, None),
+    soc("esp32c3", Arch::Riscv, None, None),
+    soc("esp32c6", Arch::Riscv, None, Some("hpcore")),
+    soc("esp32h2", Arch::Riscv, None, None),
 ];
 
 /// Must be re-checked against `boards/espressif` of each supported Zephyr release.
@@ -83,16 +82,17 @@ mod tests {
     #[test]
     fn toolchain_matches_arch() {
         for soc in SOCS {
+            // Only Xtensa needs a per-SoC toolchain; RISC-V uses the architecture default.
             match soc.arch {
-                Arch::Xtensa => assert!(soc.toolchain.starts_with("xtensa-espressif_")),
-                _ => assert_eq!(soc.toolchain, RISCV),
+                Arch::Xtensa => assert!(soc.toolchain.unwrap().starts_with("xtensa-espressif_")),
+                _ => assert_eq!(soc.toolchain, None),
             }
         }
     }
 
     #[test]
     fn xtensa_toolchains_are_per_soc() {
-        let tc = |name| PROFILE.soc(name).unwrap().toolchain;
+        let tc = |name| PROFILE.soc(name).unwrap().toolchain.unwrap();
         assert_eq!(tc("esp32"), "xtensa-espressif_esp32_zephyr-elf");
         assert_eq!(tc("esp32s2"), "xtensa-espressif_esp32s2_zephyr-elf");
         assert_eq!(tc("esp32s3"), "xtensa-espressif_esp32s3_zephyr-elf");

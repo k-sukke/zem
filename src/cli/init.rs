@@ -120,9 +120,9 @@ pub fn run(ctx: &Context, args: InitArgs) -> Result<ExitCode> {
         ),
         None => println!(
             "  board  {board}\n  target looked up in the Zephyr tree by `zem sync` \
-             (zem cannot tell the SoC from the name)\n  note   zem supports these SoCs: {}; \
-             for any other SoC, `zem sync` stops at the Board step",
-            vendor::supported_socs()
+             (zem cannot tell the SoC from the name)\n  note   zem supports SoCs of: {}; \
+             for other vendors, `zem sync` stops at the Board step",
+            vendor::supported()
         ),
     }
     for warning in validated

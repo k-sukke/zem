@@ -48,6 +48,25 @@ impl Arch {
     }
 }
 
+impl Arch {
+    /// Zephyr SDK toolchain for the architecture when it does not depend on the SoC.
+    /// Xtensa toolchains are per SoC (vendor profiles name them), and posix builds with the
+    /// host compiler.
+    pub fn default_toolchain(self) -> Option<&'static str> {
+        match self {
+            Arch::Arc => Some("arc-zephyr-elf"),
+            Arch::Arm => Some("arm-zephyr-eabi"),
+            Arch::Arm64 => Some("aarch64-zephyr-elf"),
+            Arch::Mips => Some("mips-zephyr-elf"),
+            Arch::Riscv => Some("riscv64-zephyr-elf"),
+            Arch::Rx => Some("rx-zephyr-elf"),
+            Arch::Sparc => Some("sparc-zephyr-elf"),
+            Arch::X86 => Some("x86_64-zephyr-elf"),
+            Arch::Posix | Arch::Xtensa => None,
+        }
+    }
+}
+
 impl fmt::Display for Arch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -63,13 +82,33 @@ pub enum BoardError {
     )]
     Invalid { board: String, reason: &'static str },
 
-    #[error("board `{board}` targets SoC `{soc}`, which zem does not support yet")]
-    #[diagnostic(code(zem::board::unsupported_soc), help("supported SoCs: {supported}"))]
+    #[error(
+        "board `{board}` targets SoC `{soc}` (soc/{soc_dir}), whose vendor zem does not support yet"
+    )]
+    #[diagnostic(
+        code(zem::board::unsupported_soc),
+        help("zem supports SoCs of: {supported}")
+    )]
     UnsupportedSoc {
         board: String,
         soc: String,
+        soc_dir: String,
         supported: String,
     },
+
+    #[error("cannot tell the CPU architecture of `{board}`")]
+    #[diagnostic(
+        code(zem::board::unknown_arch),
+        help("the board has no twister metadata with `arch`; set [target].arch in zem.toml")
+    )]
+    UnknownArch { board: String },
+
+    #[error("no Zephyr SDK toolchain is known for SoC {soc} ({arch})")]
+    #[diagnostic(
+        code(zem::board::no_toolchain),
+        help("{arch} toolchains differ per SoC; the vendor profile has to name it")
+    )]
+    NoToolchain { soc: String, arch: Arch },
 
     #[error("board `{board}` uses SoC {expected}, but the qualifier says `{actual}`")]
     #[diagnostic(code(zem::board::soc_mismatch))]
@@ -126,5 +165,14 @@ mod tests {
             assert_eq!(serde_json::to_value(arch).unwrap(), name);
         }
         assert!(serde_json::from_value::<Arch>(serde_json::json!("avr")).is_err());
+    }
+
+    #[test]
+    fn default_toolchains_follow_sdk_names() {
+        assert_eq!(Arch::Arm.default_toolchain(), Some("arm-zephyr-eabi"));
+        assert_eq!(Arch::Arm64.default_toolchain(), Some("aarch64-zephyr-elf"));
+        assert_eq!(Arch::Riscv.default_toolchain(), Some("riscv64-zephyr-elf"));
+        assert_eq!(Arch::Xtensa.default_toolchain(), None);
+        assert_eq!(Arch::Posix.default_toolchain(), None);
     }
 }

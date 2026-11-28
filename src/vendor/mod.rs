@@ -15,6 +15,11 @@ pub struct VendorProfile {
     /// Identifies the SoC vendor (recorded in state.json). Not a board.yml `vendor`, which
     /// names the board maker (`seeed` for `xiao_esp32c3`).
     pub id: &'static str,
+    /// Directory under Zephyr's `soc/` that holds this vendor's SoCs. Any SoC defined there
+    /// belongs to the vendor, listed in `socs` or not.
+    pub soc_dir: &'static str,
+    /// SoCs zem knows before a Zephyr tree exists, and per-SoC exceptions (toolchain,
+    /// default cluster). Not every SoC of the vendor.
     pub socs: &'static [SocInfo],
     /// Boards offered by `zem init` and resolvable without a Zephyr tree; not every board.
     pub boards: &'static [KnownBoard],
@@ -59,8 +64,8 @@ impl VendorProfile {
 pub struct SocInfo {
     pub name: &'static str,
     pub arch: Arch,
-    /// Zephyr SDK toolchain directory / `west sdk install -t` name.
-    pub toolchain: &'static str,
+    /// Zephyr SDK toolchain, when it differs from the architecture's default (Xtensa).
+    pub toolchain: Option<&'static str>,
     /// CPU cluster a board name without one targets, for SoCs with several clusters
     /// (`procpu` on ESP32). The order in soc.yml says nothing about which core is the main one.
     pub default_cpucluster: Option<&'static str>,
@@ -129,7 +134,7 @@ impl UsbId {
 const fn soc(
     name: &'static str,
     arch: Arch,
-    toolchain: &'static str,
+    toolchain: Option<&'static str>,
     default_cpucluster: Option<&'static str>,
 ) -> SocInfo {
     SocInfo {
@@ -162,12 +167,16 @@ pub fn find_board(name: &str) -> Option<(&'static VendorProfile, &'static KnownB
         .find_map(|v| v.boards.iter().find(|b| b.name == name).map(|b| (*v, b)))
 }
 
-/// Every SoC zem knows, for error messages (`esp32, esp32s2, ...`).
-pub fn supported_socs() -> String {
+/// The vendor owning `soc/<dir>/` of the Zephyr tree.
+pub fn by_soc_dir(dir: &str) -> Option<&'static VendorProfile> {
+    VENDORS.iter().copied().find(|v| v.soc_dir == dir)
+}
+
+/// Supported vendors for messages: `espressif (soc/espressif)`.
+pub fn supported() -> String {
     VENDORS
         .iter()
-        .flat_map(|v| v.socs)
-        .map(|s| s.name)
+        .map(|v| format!("{} (soc/{})", v.id, v.soc_dir))
         .collect::<Vec<_>>()
         .join(", ")
 }

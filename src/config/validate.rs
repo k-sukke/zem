@@ -255,9 +255,9 @@ mod tests {
     }
 
     #[test]
-    fn reports_unsupported_board() {
-        let err = validate(&config("nrf52840dk/nrf52840", "v4.2.0")).unwrap_err();
-        assert!(matches!(err, ZemError::Board(_)));
+    fn leaves_socs_outside_the_tables_to_sync() {
+        let v = validate(&config("nrf52840dk/nrf52840", "v4.2.0")).unwrap();
+        assert!(v.target.is_none());
     }
 
     #[test]
