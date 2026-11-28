@@ -1,0 +1,14 @@
+# cargo-release settings. `cargo release <patch|minor|major>` shows what would happen;
+# add `--execute` to bump the version, commit, tag and push. Pushing the `v*` tag starts
+# the dist release workflow (.github/workflows/release.yml), which builds and publishes.
+
+# Release only from an up-to-date main.
+allow-branch = ["main"]
+
+# Match the existing history: "Release vX.Y.Z" commits and vX.Y.Z tags.
+pre-release-commit-message = "Release v{{version}}"
+tag-name = "v{{version}}"
+tag-message = "Release v{{version}}"
+
+# zem is distributed by dist, not crates.io (Cargo.toml also sets `publish = false`).
+publish = false
