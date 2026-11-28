@@ -34,28 +34,21 @@ pub const PROFILE: VendorProfile = VendorProfile {
 const RISCV: &str = "riscv64-zephyr-elf";
 
 const SOCS: &[SocInfo] = &[
-    soc(
-        "esp32",
-        Arch::Xtensa,
-        "xtensa-espressif_esp32_zephyr-elf",
-        None,
-    ),
+    soc("esp32", Arch::Xtensa, "xtensa-espressif_esp32_zephyr-elf"),
     soc(
         "esp32s2",
         Arch::Xtensa,
         "xtensa-espressif_esp32s2_zephyr-elf",
-        None,
     ),
     soc(
         "esp32s3",
         Arch::Xtensa,
         "xtensa-espressif_esp32s3_zephyr-elf",
-        None,
     ),
-    soc("esp32c2", Arch::Riscv, RISCV, None),
-    soc("esp32c3", Arch::Riscv, RISCV, None),
-    soc("esp32c6", Arch::Riscv, RISCV, None),
-    soc("esp32h2", Arch::Riscv, RISCV, Some((4, 2))),
+    soc("esp32c2", Arch::Riscv, RISCV),
+    soc("esp32c3", Arch::Riscv, RISCV),
+    soc("esp32c6", Arch::Riscv, RISCV),
+    soc("esp32h2", Arch::Riscv, RISCV),
 ];
 
 /// Must be re-checked against `boards/espressif` of each supported Zephyr release.

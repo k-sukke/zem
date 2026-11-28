@@ -86,9 +86,12 @@ pub fn run(ctx: &Context, args: InitArgs) -> Result<ExitCode> {
     };
 
     let target = board::resolve_static(&board_input, None)?;
+    let board = target
+        .as_ref()
+        .map_or(board_input.trim(), |t| t.board.as_str());
     let text = config::render(&InitParams {
         name: &name,
-        board: &target.board,
+        board,
         zephyr_version: &zephyr_version,
         features: &args.features,
     });
@@ -107,13 +110,19 @@ pub fn run(ctx: &Context, args: InitArgs) -> Result<ExitCode> {
             root.display()
         );
     }
-    println!(
-        "  board  {}\n  target {} / {} → {}",
-        target.board,
-        target.soc,
-        target.arch,
-        target.toolchains.join(", ")
-    );
+    match &target {
+        Some(t) => println!(
+            "  board  {}\n  target {} / {} → {}",
+            t.board,
+            t.soc,
+            t.arch,
+            t.toolchains.join(", ")
+        ),
+        None => println!(
+            "  board  {board}\n  target looked up in the Zephyr tree by `zem sync` \
+             (zem cannot tell the SoC from the name)"
+        ),
+    }
     for warning in validated
         .warnings
         .iter()

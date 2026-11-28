@@ -6,13 +6,14 @@ use console::style;
 
 use super::SyncPlan;
 use super::plan::short;
-use crate::board::{ResolutionSource, board_yml};
+use crate::board::board_yml;
 use crate::config::{LoadedConfig, ZemConfig, classify_revision};
 use crate::env::{EnvBuilder, EnvLocations, zem_env};
 use crate::error::{Result, ZemError};
 use crate::fsutil;
 use crate::home::ZemHome;
 use crate::lockfile::{self, Lockfile, Pins, PythonLock, SdkLock, ZephyrLock};
+use crate::manifest::project_modules;
 use crate::platform;
 use crate::process::Runner;
 use crate::project::{ProjectState, STATE_SCHEMA, StoreRef, TargetState};
@@ -234,9 +235,43 @@ fn run_steps(
         env: &west_env,
         runner: &runner,
     };
-    let ws = workspace.ensure(&plan.modules, opts.update)?;
-    let commits = workspace
-        .commits(std::iter::once("zephyr").chain(plan.modules.iter().map(String::as_str)))?;
+    let mut ws = workspace.ensure(&plan.modules, opts.update)?;
+    steps.done(match (ws.updated, ws.added.is_empty()) {
+        (false, _) => format!("up to date ({ws_key})"),
+        (true, true) => format!("updated {ws_key}"),
+        (true, false) => format!("{ws_key}: added {}", ws.added.join(", ")),
+    });
+
+    // The tree is the source of truth for the board. Boards zem could not resolve from the
+    // name alone are found here, and their HAL is added to the workspace afterwards.
+    steps.begin("Board");
+    let input = plan
+        .target
+        .as_ref()
+        .map_or(plan.board.as_str(), |t| t.board.as_str());
+    let target = board_yml::resolve(&ws.zephyr_base, input, cfg.target.arch, &cfg.zephyr.version)?;
+    if let Some(expected) = plan.target.as_ref().filter(|t| t.soc != target.soc) {
+        eprintln!(
+            "{} zem expected SoC {} for `{}`, but the Zephyr tree says {}; using {}",
+            style("warning:").yellow().bold(),
+            expected.soc,
+            plan.board,
+            target.soc,
+            target.soc
+        );
+    }
+    let modules = project_modules(cfg, Some(&target));
+    let mut board_detail = format!("{} ({} / {})", target.board, target.soc, target.arch);
+    if !modules.is_subset(&plan.modules) {
+        ws = workspace.ensure(&modules, false)?;
+        if !ws.added.is_empty() {
+            board_detail.push_str(&format!(", added {}", ws.added.join(", ")));
+        }
+    }
+    steps.done(board_detail);
+
+    let commits =
+        workspace.commits(std::iter::once("zephyr").chain(modules.iter().map(String::as_str)))?;
     let commit_of = |name: &str| {
         commits
             .get(name)
@@ -248,7 +283,7 @@ fn run_steps(
     let zephyr_commit = commit_of("zephyr")?;
     pins.verify("zephyr commit", pins.commit.as_deref(), &zephyr_commit)?;
     let mut module_commits = BTreeMap::new();
-    for module in &plan.modules {
+    for module in &modules {
         let sha = commit_of(module)?;
         pins.verify(
             &format!("module {module}"),
@@ -257,20 +292,6 @@ fn run_steps(
         )?;
         module_commits.insert(module.clone(), sha);
     }
-    steps.done(match (ws.updated, ws.added.is_empty()) {
-        (false, _) => format!("up to date ({ws_key})"),
-        (true, true) => format!("updated {ws_key}"),
-        (true, false) => format!("{ws_key}: added {}", ws.added.join(", ")),
-    });
-
-    steps.begin("Board");
-    board_yml::verify(&ws.zephyr_base, &plan.target, &cfg.zephyr.version)?;
-    let mut target = plan.target.clone();
-    target.source = ResolutionSource::BoardYml;
-    steps.done(format!(
-        "{} ({} / {})",
-        target.board, target.soc, target.arch
-    ));
 
     steps.begin("Python requirements");
     let env = sync_env(home, &selected.dir, cfg);
@@ -330,8 +351,7 @@ fn run_steps(
     });
 
     steps.begin("Project state");
-    let modules: BTreeMap<String, _> = plan
-        .modules
+    let module_paths: BTreeMap<String, _> = modules
         .iter()
         .map(|m| {
             ws.projects
@@ -362,7 +382,7 @@ fn run_steps(
             path: plan.workspace_dir.clone(),
         },
         zephyr_base: ws.zephyr_base.clone(),
-        modules,
+        modules: module_paths,
         venv: StoreRef {
             key: selected.name.clone(),
             path: selected.dir.clone(),

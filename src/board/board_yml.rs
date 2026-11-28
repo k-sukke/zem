@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::{BoardError, BoardId, ResolvedTarget};
+use super::resolve::build;
+use super::{Arch, BoardError, BoardId, ResolutionSource, ResolvedTarget};
+use crate::vendor;
 
 #[derive(Debug, Deserialize)]
 struct BoardFile {
@@ -164,57 +166,94 @@ pub fn valid_targets(board: &BoardEntry, soc: &BoardSoc, clusters: &[String]) ->
     targets
 }
 
-pub fn verify(
+/// Resolve `input` against the Zephyr tree: the board must exist, have the SoC, and name a
+/// valid build target. A bare name of a single-SoC board picks that SoC, and a name without a
+/// CPU cluster on a multi-core SoC gets the SoC's first cluster (`procpu`, `cpuapp`, ...).
+/// The SoC must belong to a vendor profile, which supplies the toolchain and HAL modules.
+pub fn resolve(
     zephyr_base: &Path,
-    target: &ResolvedTarget,
+    input: &str,
+    arch_override: Option<Arch>,
     zephyr_version: &str,
-) -> Result<(), BoardError> {
-    let id = BoardId::parse(&target.board)?;
+) -> Result<ResolvedTarget, BoardError> {
+    let id = BoardId::parse(input)?;
     let board = find_board(zephyr_base, &id.name).ok_or_else(|| BoardError::NotInZephyr {
         board: id.name.clone(),
         version: zephyr_version.to_string(),
     })?;
-    let soc_name = target.soc.as_str();
-    let soc = board
-        .socs
-        .iter()
-        .find(|s| s.name == soc_name)
-        .ok_or_else(|| BoardError::SocNotOnBoard {
-            board: board.name.clone(),
-            soc: soc_name.to_string(),
-            available: board
-                .socs
-                .iter()
-                .map(|s| s.name.clone())
-                .collect::<Vec<_>>()
-                .join(", "),
-        })?;
-    let clusters = soc_cpuclusters(zephyr_base, soc_name);
+    let soc =
+        match id.soc() {
+            Some(name) => board.socs.iter().find(|s| s.name == name).ok_or_else(|| {
+                BoardError::SocNotOnBoard {
+                    board: board.name.clone(),
+                    soc: name.to_string(),
+                    available: board
+                        .socs
+                        .iter()
+                        .map(|s| s.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                }
+            })?,
+            None => match board.socs.as_slice() {
+                [only] => only,
+                socs => {
+                    return Err(BoardError::InvalidTarget {
+                        board: input.trim().to_string(),
+                        valid: socs
+                            .iter()
+                            .flat_map(|s| {
+                                valid_targets(&board, s, &soc_cpuclusters(zephyr_base, &s.name))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    });
+                }
+            },
+        };
+    let clusters = soc_cpuclusters(zephyr_base, &soc.name);
     let valid = valid_targets(&board, soc, &clusters);
 
-    let mut requested = id.clone();
-    requested.revision = None;
-    let requested = requested.to_string();
-    let accepted = valid.contains(&requested)
-        || (clusters.is_empty() && requested == format!("{}/{}", board.name, soc_name));
-    if accepted {
-        Ok(())
+    let is_valid = |id: &BoardId| {
+        let mut requested = id.clone();
+        requested.revision = None;
+        let requested = requested.to_string();
+        valid.contains(&requested)
+            || (clusters.is_empty() && requested == format!("{}/{}", board.name, soc.name))
+    };
+    let target = if is_valid(&id) {
+        id.clone()
+    } else if id.qualifiers.len() <= 1 && !clusters.is_empty() {
+        id.with_qualifiers(&format!("{}/{}", soc.name, clusters[0]))
     } else {
-        Err(BoardError::InvalidTarget {
-            board: target.board.clone(),
+        return Err(BoardError::InvalidTarget {
+            board: input.trim().to_string(),
             valid: valid.join(", "),
-        })
-    }
+        });
+    };
+
+    let (vendor, info) = vendor::find_soc(&soc.name).ok_or_else(|| BoardError::UnsupportedSoc {
+        board: input.trim().to_string(),
+        soc: soc.name.clone(),
+        supported: vendor::supported_socs(),
+    })?;
+    build(
+        input,
+        &target,
+        vendor,
+        info,
+        ResolutionSource::BoardYml,
+        arch_override,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::board::fixtures;
-    use crate::board::resolve_static;
 
-    fn check(base: &Path, board: &str) -> Result<(), BoardError> {
-        verify(base, &resolve_static(board, None).unwrap(), "v4.2.0")
+    fn check(base: &Path, board: &str) -> Result<ResolvedTarget, BoardError> {
+        resolve(base, board, None, "v4.2.0")
     }
 
     /// All `west build -b` targets of `board` on its first SoC, as the tree describes them.
@@ -237,10 +276,6 @@ mod tests {
     #[test]
     fn rejects_missing_cpucluster_and_unknown_boards() {
         let tree = fixtures::zephyr_tree();
-        assert!(matches!(
-            check(tree.path(), "esp32s3_devkitc/esp32s3"),
-            Err(BoardError::InvalidTarget { .. })
-        ));
         assert!(matches!(
             check(tree.path(), "esp32s3_devkitc/esp32s3/lpcore"),
             Err(BoardError::InvalidTarget { .. })
@@ -313,5 +348,56 @@ mod tests {
         let base = tree.path();
         assert!(find_board(base, "some_other_board").is_some());
         assert!(find_board(base, "missing_board").is_none());
+    }
+
+    #[test]
+    fn expands_names_without_a_cpucluster() {
+        let tree = fixtures::zephyr_tree();
+        for input in ["esp32s3_devkitc", "esp32s3_devkitc/esp32s3"] {
+            let t = check(tree.path(), input).unwrap();
+            assert_eq!(t.board, "esp32s3_devkitc/esp32s3/procpu");
+            assert_eq!(t.normalized_from.as_deref(), Some(input));
+        }
+        let t = check(tree.path(), "esp32c3_devkitm").unwrap();
+        assert_eq!(
+            (t.board.as_str(), t.normalized_from),
+            ("esp32c3_devkitm", None)
+        );
+    }
+
+    #[test]
+    fn resolves_boards_missing_from_the_vendor_tables() {
+        let tree = fixtures::zephyr_tree();
+        // Not a known board and its name does not start with a SoC name.
+        let t = check(tree.path(), "m5stack_atoms3").unwrap();
+        assert_eq!(t.board, "m5stack_atoms3/esp32s3/procpu");
+        assert_eq!(t.vendor.id, "espressif");
+        assert_eq!(t.soc.as_str(), "esp32s3");
+        assert_eq!(t.toolchains, ["xtensa-espressif_esp32s3_zephyr-elf"]);
+        assert_eq!(t.hal_modules, ["hal_espressif"]);
+        assert_eq!(t.source, ResolutionSource::BoardYml);
+    }
+
+    #[test]
+    fn rejects_socs_without_a_vendor_profile() {
+        let tree = fixtures::zephyr_tree();
+        for board in ["nucleo_f401re", "nrf5340dk", "rpi_pico"] {
+            assert!(
+                matches!(
+                    check(tree.path(), board),
+                    Err(BoardError::UnsupportedSoc { .. })
+                ),
+                "{board}"
+            );
+        }
+    }
+
+    #[test]
+    fn checks_the_arch_override() {
+        let tree = fixtures::zephyr_tree();
+        assert!(matches!(
+            resolve(tree.path(), "m5stack_atoms3", Some(Arch::Riscv), "v4.2.0"),
+            Err(BoardError::ArchMismatch { .. })
+        ));
     }
 }

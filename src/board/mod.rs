@@ -15,11 +15,6 @@ pub use qualifier::BoardId;
 pub use resolve::{ResolutionSource, ResolvedTarget, resolve_static};
 pub use soc::SocId;
 
-/// Latest Zephyr release (major, minor) known to lack `soc` entirely, if any.
-pub fn soc_absent_through(soc: &SocId) -> Option<(u32, u32)> {
-    crate::vendor::find_soc(soc.as_str()).and_then(|(_, info)| info.absent_through)
-}
-
 /// CPU architecture, one per directory under Zephyr's `arch/` (v4.0 and later).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -75,17 +70,6 @@ pub enum BoardError {
         soc: String,
         supported: String,
     },
-
-    #[error("unknown board `{board}`")]
-    #[diagnostic(
-        code(zem::board::unknown),
-        help(
-            "zem cannot tell which SoC this board uses. If it is one of the supported SoCs \
-             ({supported}), add it as a qualifier, e.g. `{board}/<soc>` or `{board}/<soc>/<cpucluster>`; \
-             run `zem init` interactively to see known boards"
-        )
-    )]
-    Unknown { board: String, supported: String },
 
     #[error("board `{board}` uses SoC {expected}, but the qualifier says `{actual}`")]
     #[diagnostic(code(zem::board::soc_mismatch))]

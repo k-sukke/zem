@@ -336,13 +336,45 @@ fn project_checks(project: crate::Result<LoadedConfig>) -> Vec<Check> {
     };
     match sync::plan(&loaded, &home) {
         Ok(plan) => {
-            let t = &plan.target;
-            checks.push(Check::new(Status::Ok, "board", t.board.clone()));
-            checks.push(Check::new(
-                Status::Ok,
-                "target",
-                format!("{} / {} → {}", t.soc, t.arch, t.toolchains.join(", ")),
-            ));
+            // Only a state synced from this exact zem.toml describes the current board.
+            let synced = plan
+                .project
+                .read_state()
+                .ok()
+                .flatten()
+                .filter(|s| s.config_hash == loaded.content_hash)
+                .map(|s| s.target);
+            let (board, target) = match (&plan.target, synced) {
+                (Some(t), _) => (
+                    t.board.clone(),
+                    Some(format!(
+                        "{} / {} → {}",
+                        t.soc,
+                        t.arch,
+                        t.toolchains.join(", ")
+                    )),
+                ),
+                // Resolved from the Zephyr tree by the last sync.
+                (None, Some(s)) => (
+                    s.board.clone(),
+                    Some(format!(
+                        "{} / {} → {}",
+                        s.soc,
+                        s.arch,
+                        s.toolchains.join(", ")
+                    )),
+                ),
+                (None, None) => (plan.board.clone(), None),
+            };
+            checks.push(Check::new(Status::Ok, "board", board));
+            checks.push(match target {
+                Some(target) => Check::new(Status::Ok, "target", target),
+                None => Check::new(
+                    Status::Info,
+                    "target",
+                    "looked up in the Zephyr tree by `zem sync`",
+                ),
+            });
             for warning in &plan.warnings {
                 checks.push(Check::new(Status::Warn, "config", warning.clone()));
             }

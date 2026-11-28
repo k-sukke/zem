@@ -16,7 +16,12 @@ use crate::store::venv;
 pub struct SyncPlan {
     pub project: ProjectDir,
     pub zem_home: PathBuf,
-    pub target: ResolvedTarget,
+    /// The board as written in zem.toml.
+    pub board: String,
+    /// `None` until sync resolves the board from the Zephyr tree.
+    pub target: Option<ResolvedTarget>,
+    /// Modules known before the workspace exists. Sync adds the HAL of a target it resolves
+    /// from the tree.
     pub modules: BTreeSet<String>,
     pub workspace_key: WorkspaceKey,
     pub workspace_dir: PathBuf,
@@ -57,7 +62,8 @@ pub fn plan(loaded: &LoadedConfig, home: &ZemHome) -> Result<SyncPlan> {
 
     let (workspace_key, venv_key) = keys(loaded, workspace_revision);
     let plan = SyncPlan {
-        modules: project_modules(cfg, &validated.target),
+        board: cfg.target.board.trim().to_string(),
+        modules: project_modules(cfg, validated.target.as_ref()),
         zem_home: home.root().to_path_buf(),
         target: validated.target,
         project,
@@ -102,7 +108,6 @@ impl SyncPlan {
 
     pub fn render(&self) -> String {
         let mut out = String::new();
-        let t = &self.target;
         let modules: Vec<_> = self.modules.iter().map(String::as_str).collect();
         let sdk = match (&self.sdk_version, &self.sdk_dir) {
             (SdkVersion::Exact(v), Some(dir)) => format!("{v} ({})", dir.display()),
@@ -122,13 +127,38 @@ impl SyncPlan {
         };
         let rows = [
             ("project", self.project.root().display().to_string()),
-            ("board", t.board.clone()),
+            (
+                "board",
+                self.target
+                    .as_ref()
+                    .map_or(self.board.clone(), |t| t.board.clone()),
+            ),
             (
                 "soc / arch",
-                format!("{} / {} (via {})", t.soc, t.arch, t.source.describe()),
+                match &self.target {
+                    Some(t) => format!("{} / {} (via {})", t.soc, t.arch, t.source.describe()),
+                    None => "resolved from the Zephyr tree during sync".to_string(),
+                },
             ),
-            ("toolchains", t.toolchains.join(", ")),
-            ("modules", modules.join(", ")),
+            (
+                "toolchains",
+                self.target.as_ref().map_or_else(
+                    || "after the board is resolved".to_string(),
+                    |t| t.toolchains.join(", "),
+                ),
+            ),
+            (
+                "modules",
+                match &self.target {
+                    Some(_) => modules.join(", "),
+                    None => modules
+                        .iter()
+                        .copied()
+                        .chain(["the board's HAL (added during sync)"])
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                },
+            ),
             ("ZEM_HOME", self.zem_home.display().to_string()),
             ("workspace", workspace),
             ("west venv", self.west_dir.display().to_string()),
