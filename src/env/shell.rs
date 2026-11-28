@@ -148,11 +148,16 @@ pub fn is_portable_name(name: &str) -> bool {
 fn name_allowed(name: &str, shell: ShellKind) -> bool {
     match shell {
         ShellKind::Posix | ShellKind::Fish => is_portable_name(name),
-        ShellKind::PowerShell | ShellKind::Cmd => {
-            !name.is_empty() && !name.contains('=') && !name.contains(char::is_control)
-        }
+        ShellKind::PowerShell => windows_name(name),
+        // `set /P` and `set /A` are switches (`set /P X=` waits for input), and `set` drops
+        // leading blanks, so the name must not start with either.
+        ShellKind::Cmd => windows_name(name) && !name.starts_with(['/', ' ', '\t']),
         ShellKind::Json => true,
     }
+}
+
+fn windows_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('=') && !name.contains(char::is_control)
 }
 
 pub fn render(diff: &EnvDiff, shell: ShellKind) -> String {
@@ -385,6 +390,18 @@ mod tests {
             assert!(out.contains("PROGRAMFILES"), "{out}");
         }
         assert!(render(&d, ShellKind::Json).contains("INJECTED"));
+    }
+
+    #[test]
+    fn cmd_skips_names_set_reads_as_switches() {
+        let current = EnvBuilder::from_vars([("/P OLD", "x")]);
+        let target = EnvBuilder::from_vars([("/P ZEM_TEST", "1"), ("/A X", "1"), (" LEAD", "1")]);
+        let out = render(&diff(&current, &target), ShellKind::Cmd);
+        assert_eq!(
+            out, "@rem zem: skipped 4 variable(s) whose names this shell cannot use\n",
+            "{out}"
+        );
+        assert!(render(&diff(&current, &target), ShellKind::PowerShell).contains("/P ZEM_TEST"));
     }
 
     #[test]
