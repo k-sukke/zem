@@ -2,6 +2,7 @@
 
 > 作成: 2026-11-28（v0.2.1 時点）
 > 前提: ESP32 の build / flash が macOS / Windows / Linux の実機で成功している。MVP の設計は [mvp-plan.md](mvp-plan.md)
+> 進捗: [multi-mcu-progress.md](multi-mcu-progress.md)
 > 目的: ESP32 以外の MCU（nRF、STM32、RP2040、NXP など）を追加する**前に**、ESP32 前提で書かれている箇所を洗い出し、
 > 「ベンダーを 1 つ足すたびにコードのあちこちを触る」状態を避けるための手順を決める
 
