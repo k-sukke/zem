@@ -18,8 +18,6 @@ struct BoardFile {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BoardEntry {
     pub name: String,
-    /// Vendor prefix (`espressif`, `nordic`, ...); some board.yml files omit it.
-    pub vendor: Option<String>,
     #[serde(default)]
     pub socs: Vec<BoardSoc>,
 }
@@ -37,16 +35,39 @@ pub struct Variant {
     pub cpucluster: Option<String>,
 }
 
+/// HWMv2 `soc.yml`. SoCs may be listed under `family → series`, directly under a family,
+/// under a top-level series, or at the top level (e.g. `soc/native/inf_clock/soc.yml`).
 #[derive(Debug, Deserialize)]
 struct SocFile {
     #[serde(default)]
     family: Vec<Family>,
+    #[serde(default)]
+    series: Vec<Series>,
+    #[serde(default)]
+    socs: Vec<SocEntry>,
+}
+
+impl SocFile {
+    fn into_socs(self) -> impl Iterator<Item = SocEntry> {
+        self.family
+            .into_iter()
+            .flat_map(|f| {
+                f.series
+                    .into_iter()
+                    .chain(std::iter::once(Series { socs: f.socs }))
+            })
+            .chain(self.series)
+            .chain(std::iter::once(Series { socs: self.socs }))
+            .flat_map(|s| s.socs)
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct Family {
     #[serde(default)]
     series: Vec<Series>,
+    #[serde(default)]
+    socs: Vec<SocEntry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,16 +124,18 @@ fn files_named(dir: &Path, file_name: &str) -> Vec<PathBuf> {
 /// CPU clusters of `soc`, from whichever `soc/**/soc.yml` defines it (vendors keep it at
 /// different depths, e.g. `soc/espressif/soc.yml` and `soc/st/stm32/soc.yml`).
 pub fn soc_cpuclusters(zephyr_base: &Path, soc: &str) -> Vec<String> {
+    find_soc(zephyr_base, soc)
+        .map(|s| s.cpuclusters.into_iter().map(|c| c.name).collect())
+        .unwrap_or_default()
+}
+
+fn find_soc(zephyr_base: &Path, soc: &str) -> Option<SocEntry> {
     files_named(&zephyr_base.join("soc"), "soc.yml")
         .into_iter()
         .filter_map(|path| fs::read_to_string(path).ok())
         .filter_map(|text| serde_yaml_ng::from_str::<SocFile>(&text).ok())
-        .flat_map(|f| f.family)
-        .flat_map(|f| f.series)
-        .flat_map(|s| s.socs)
+        .flat_map(SocFile::into_socs)
         .find(|s| s.name == soc)
-        .map(|s| s.cpuclusters.into_iter().map(|c| c.name).collect())
-        .unwrap_or_default()
 }
 
 /// All `west build -b` targets the board offers for `soc`.
@@ -260,7 +283,11 @@ mod tests {
             find_board(base, "nucleo_f401re").unwrap().socs[0].name,
             "stm32f401xe"
         );
-        assert_eq!(targets(base, "rpi_pico"), ["rpi_pico"]);
+        assert_eq!(targets(base, "rpi_pico"), ["rpi_pico", "rpi_pico/rp2040/w"]);
+        assert_eq!(
+            targets(base, "max32690evkit"),
+            ["max32690evkit/max32690/m4"]
+        );
         assert_eq!(
             targets(base, "native_sim"),
             ["native_sim", "native_sim/native/64"]
@@ -268,14 +295,22 @@ mod tests {
     }
 
     #[test]
-    fn reads_vendor_and_multi_board_files() {
+    fn reads_socs_in_every_soc_yml_layout() {
         let tree = fixtures::zephyr_tree();
         let base = tree.path();
-        assert_eq!(
-            find_board(base, "nrf5340dk").unwrap().vendor.as_deref(),
-            Some("nordic")
-        );
-        assert_eq!(find_board(base, "esp32c3_devkitm").unwrap().vendor, None);
+        // family → series, family → socs, top-level series, top-level socs.
+        assert_eq!(soc_cpuclusters(base, "nrf5340"), ["cpuapp", "cpunet"]);
+        assert_eq!(soc_cpuclusters(base, "max32690"), ["m4"]);
+        for soc in ["native", "xenvm", "rts5912"] {
+            assert!(find_soc(base, soc).is_some(), "{soc}");
+        }
+        assert!(find_soc(base, "missing_soc").is_none());
+    }
+
+    #[test]
+    fn reads_multi_board_files() {
+        let tree = fixtures::zephyr_tree();
+        let base = tree.path();
         assert!(find_board(base, "some_other_board").is_some());
         assert!(find_board(base, "missing_board").is_none());
     }
